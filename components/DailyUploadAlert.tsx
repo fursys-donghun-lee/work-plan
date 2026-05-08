@@ -3,9 +3,9 @@
 import Link from "next/link";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useHydrated } from "@/components/useComputed";
-import { AlertTriangle } from "lucide-react";
 
-// 일일자료 5종 중 오늘 업로드되지 않은 것을 위쪽 배너로 알림.
+// 일일자료 5종 중 오늘 업로드되지 않은 것을 위쪽 빨간 라인으로 알림.
+// 클릭 시 일일자료 업로드 페이지로 이동.
 // - 오늘 = 사용자 PC 의 로컬 날짜 (YYYY-MM-DD)
 // - 각 자료의 meta.uploadedAt 의 로컬 날짜와 비교
 // - 미업로드 또는 어제 이전이면 누락으로 간주
@@ -46,26 +46,16 @@ export function DailyUploadAlert() {
   ];
 
   const missing = checks.filter((c) => !isToday(c.uploadedAt));
-
   if (missing.length === 0) return null;
 
   return (
-    <div className="bg-amber-50 border border-amber-300 text-amber-900 rounded-lg p-3 flex items-start gap-3">
-      <AlertTriangle className="w-5 h-5 text-amber-600 mt-0.5 shrink-0" />
-      <div className="flex-1 min-w-0">
-        <div className="font-semibold text-sm">
-          오늘 업로드되지 않은 일일자료 {missing.length}건
-        </div>
-        <div className="text-xs mt-1">
-          {missing.map((m) => m.label).join(", ")}
-        </div>
-      </div>
-      <Link
-        href="/upload"
-        className="text-xs font-medium text-amber-900 hover:text-amber-700 underline whitespace-nowrap"
-      >
-        업로드 →
-      </Link>
-    </div>
+    <Link
+      href="/upload"
+      className="block bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-lg px-4 py-3 shadow transition-colors"
+    >
+      <span className="text-base">
+        ⛔ {missing.map((m) => m.label).join(" ")} 업로드 필요
+      </span>
+    </Link>
   );
 }

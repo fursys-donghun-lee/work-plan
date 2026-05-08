@@ -166,9 +166,6 @@ export function LandingSelector() {
                 <Lock className="w-6 h-6 text-slate-600" />
               </div>
               <h2 className="text-lg font-bold text-slate-900">관리자 비밀번호</h2>
-              <p className="text-xs text-slate-500 mt-1">
-                기준자료/일일자료 업로드 및 통합 대시보드 접근용
-              </p>
             </div>
             <input
               type="password"
