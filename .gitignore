@@ -1,0 +1,13 @@
+node_modules
+.next
+.env*.local
+*.log
+.DS_Store
+out/
+build/
+
+# 구 로컬 서버용 데이터 (Firestore 마이그레이션 후 미사용 — 직원/근태 데이터 포함)
+data/
+
+# 디버깅용 스크립트 (배포 불필요)
+scripts/
