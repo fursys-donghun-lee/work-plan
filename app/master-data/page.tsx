@@ -52,10 +52,24 @@ export default function MasterDataPage() {
   const setLoadBar = useDataStore((s) => s.setLoadBar);
   const setPackagePosition = useDataStore((s) => s.setPackagePosition);
   const setLineBase = useDataStore((s) => s.setLineBase);
+  const addUploadLog = useDataStore((s) => s.addUploadLog);
 
   const [tab, setTab] = useState<Tab>("근무기준");
 
   if (!hydrated) return null;
+
+  const logUpload = (
+    category: import("@/lib/types").UploadLogEntry["category"],
+    file: File,
+    rowCount: number
+  ) =>
+    addUploadLog({
+      category,
+      scope: "기준자료",
+      fileName: file.name,
+      uploadedAt: new Date().toISOString(),
+      rowCount,
+    });
 
   const handleWorkStandard = async (file: File) => {
     const data = await parseWorkStandard(file);
@@ -64,6 +78,7 @@ export default function MasterDataPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("근무기준", file, data.length);
   };
 
   const handleEquipment = async (file: File) => {
@@ -73,6 +88,7 @@ export default function MasterDataPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("설비기준", file, data.length);
   };
 
   const handleLoadBar = async (file: File) => {
@@ -82,6 +98,7 @@ export default function MasterDataPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("로드바 정보", file, data.length);
   };
 
   const handlePackagePosition = async (file: File) => {
@@ -91,6 +108,7 @@ export default function MasterDataPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("포장라인 기본근무위치", file, data.length);
   };
 
   const handleLineBase = async (file: File) => {
@@ -100,6 +118,7 @@ export default function MasterDataPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("라인 기준인원", file, data.length);
   };
 
   return (

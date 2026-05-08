@@ -102,6 +102,26 @@ export interface UrgentProductionRow {
   shipQty: number;         // 출고수량 (I열)
 }
 
+// === 업로드 로그 (감사용) ===
+// 어떤 자료가 언제 업로드/수정됐는지 기록.
+export interface UploadLogEntry {
+  category:
+    | "근무기준"
+    | "설비기준"
+    | "로드바 정보"
+    | "포장라인 기본근무위치"
+    | "라인 기준인원"
+    | "근태"
+    | "라인별 공정 부하"
+    | "도장계획"
+    | "라인별 포장 부하"
+    | "긴급생산리스트";
+  scope: "기준자료" | "일일자료";
+  fileName: string;
+  uploadedAt: string; // ISO timestamp
+  rowCount: number;
+}
+
 // === 라인별 포장 부하 (Package Load) ===
 export interface PackageLoadRow {
   no: string;

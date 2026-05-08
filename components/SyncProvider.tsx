@@ -46,6 +46,7 @@ const SYNCED_KEYS = [
   "package2SupportPlacements",
   "package2GroupMerges",
   "overtimeConfirmed",
+  "uploadLog",
 ] as const;
 
 function pickSynced(state: Record<string, unknown>): Record<string, unknown> {
@@ -85,6 +86,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const [, setHydrated] = useState(false);
   const lastWriteRef = useRef<string>("");
   const ignoreNextRemoteRef = useRef<boolean>(false);
+  // 로컬 변경이 디바운스 큐에 있거나 쓰기 진행 중일 때 true.
+  // 이 동안 Firestore 에서 들어오는 snapshot 은 우리 변경을 덮어쓰면 안 되므로 무시.
+  const localPendingRef = useRef<boolean>(false);
 
   // 1) Firestore 실시간 구독 (서버 → 클라이언트)
   useEffect(() => {
@@ -118,6 +122,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
             }).catch((e) => console.warn("[SyncProvider] initial push", e));
             lastWriteRef.current = JSON.stringify(cur);
           }
+          setHydrated(true);
+          return;
+        }
+
+        // 로컬 변경이 디바운스/전송 대기 중이면 원격 snapshot 무시 (덮어쓰기 방지)
+        if (localPendingRef.current) {
           setHydrated(true);
           return;
         }
@@ -157,7 +167,10 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       const state = useDataStore.getState() as unknown as Record<string, unknown>;
       const synced = pickSynced(state);
       const body = JSON.stringify(synced);
-      if (body === lastWriteRef.current) return;
+      if (body === lastWriteRef.current) {
+        localPendingRef.current = false;
+        return;
+      }
       if (inflight) {
         pending = true;
         return;
@@ -176,6 +189,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (pending) {
           pending = false;
           flush();
+        } else {
+          localPendingRef.current = false;
         }
       }
     };
@@ -194,6 +209,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       ) {
         return;
       }
+      // 로컬 변경 발생 → flush 끝날 때까지 원격 snapshot 무시
+      localPendingRef.current = true;
       if (timer) clearTimeout(timer);
       timer = setTimeout(flush, 800);
     });

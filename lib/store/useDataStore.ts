@@ -18,6 +18,7 @@ import type {
   SupportAssignment,
   SupportRedirect,
   SupportTargetLine,
+  UploadLogEntry,
   UrgentProductionRow,
   WorkGroup,
 } from "@/lib/types";
@@ -77,6 +78,9 @@ interface DataState {
   // 오늘 잔업 확정된 사원코드 (라인/회사 구분 없이 통합 — 화면에서 필터링)
   overtimeConfirmed: string[];
 
+  // 업로드 로그 (최근 50개 유지)
+  uploadLog: UploadLogEntry[];
+
   // Actions
   setSelectedCompany: (company: Company) => void;
   setCompanyChosen: (chosen: boolean) => void;
@@ -129,6 +133,8 @@ interface DataState {
   resetPackage2GroupMerges: () => void;
   toggleOvertimeConfirmed: (empCode: string) => void;
   clearOvertimeConfirmed: () => void;
+  addUploadLog: (entry: UploadLogEntry) => void;
+  clearUploadLog: () => void;
   clearAllData: () => void;
 }
 
@@ -181,6 +187,7 @@ export const useDataStore = create<DataState>()(
       package2SupportPlacements: [],
       package2GroupMerges: [],
       overtimeConfirmed: [],
+      uploadLog: [],
 
       setSelectedCompany: (company) => set({ selectedCompany: company }),
       setCompanyChosen: (chosen) => set({ companyChosen: chosen }),
@@ -409,6 +416,11 @@ export const useDataStore = create<DataState>()(
           return { overtimeConfirmed: Array.from(next) };
         }),
       clearOvertimeConfirmed: () => set({ overtimeConfirmed: [] }),
+      addUploadLog: (entry) =>
+        set((state) => ({
+          uploadLog: [entry, ...state.uploadLog].slice(0, 50),
+        })),
+      clearUploadLog: () => set({ uploadLog: [] }),
       clearAllData: () =>
         set({
           selectedCompany: "전체" as Company,
@@ -443,6 +455,7 @@ export const useDataStore = create<DataState>()(
           package2SupportPlacements: [],
           package2GroupMerges: [],
           overtimeConfirmed: [],
+          uploadLog: [],
         }),
     }),
     {

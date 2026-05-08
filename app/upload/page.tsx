@@ -29,8 +29,24 @@ export default function UploadPage() {
   const packageLoadMeta = useDataStore((s) => s.packageLoadMeta);
   const urgentProductionMeta = useDataStore((s) => s.urgentProductionMeta);
   const workDate = useDataStore((s) => s.workDate);
+  const uploadLog = useDataStore((s) => s.uploadLog);
+  const addUploadLog = useDataStore((s) => s.addUploadLog);
 
   if (!hydrated) return null;
+
+  const logUpload = (
+    category: import("@/lib/types").UploadLogEntry["category"],
+    file: File,
+    rowCount: number
+  ) => {
+    addUploadLog({
+      category,
+      scope: "일일자료",
+      fileName: file.name,
+      uploadedAt: new Date().toISOString(),
+      rowCount,
+    });
+  };
 
   const handleAttendance = async (file: File) => {
     const { records, workDate: wd } = await parseAttendance(file);
@@ -41,6 +57,7 @@ export default function UploadPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("근태", file, records.length);
   };
 
   const handleLoadPlan = async (file: File) => {
@@ -52,6 +69,7 @@ export default function UploadPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("라인별 공정 부하", file, rows.length);
   };
 
   const handlePaintPlan = async (file: File) => {
@@ -63,6 +81,7 @@ export default function UploadPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("도장계획", file, rows.length);
   };
 
   const handlePackageLoad = async (file: File) => {
@@ -74,6 +93,7 @@ export default function UploadPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("라인별 포장 부하", file, rows.length);
   };
 
   const handleUrgentProduction = async (file: File) => {
@@ -87,6 +107,7 @@ export default function UploadPage() {
       fileName: file.name,
       uploadedAt: new Date().toISOString(),
     });
+    logUpload("긴급생산리스트", file, rows.length);
   };
 
   return (
@@ -173,7 +194,70 @@ export default function UploadPage() {
           </Link>
         </div>
       </div>
+
+      {/* 업로드 로그 */}
+      <div className="card">
+        <h3 className="font-semibold text-slate-800 mb-2">
+          업로드 로그 (최근 50건)
+        </h3>
+        {uploadLog.length === 0 ? (
+          <p className="text-sm text-slate-500">아직 업로드 기록이 없습니다.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="table-base">
+              <thead>
+                <tr>
+                  <th>일시</th>
+                  <th>구분</th>
+                  <th>자료</th>
+                  <th>파일명</th>
+                  <th className="text-right">행 수</th>
+                </tr>
+              </thead>
+              <tbody>
+                {uploadLog.map((e, i) => (
+                  <tr key={`${e.uploadedAt}-${i}`}>
+                    <td className="text-xs whitespace-nowrap">
+                      {formatLocal(e.uploadedAt)}
+                    </td>
+                    <td>
+                      <span
+                        className={
+                          e.scope === "기준자료"
+                            ? "badge bg-purple-100 text-purple-700"
+                            : "badge badge-blue"
+                        }
+                      >
+                        {e.scope}
+                      </span>
+                    </td>
+                    <td className="font-medium">{e.category}</td>
+                    <td className="text-xs text-slate-600 max-w-xs truncate">
+                      {e.fileName}
+                    </td>
+                    <td className="text-right">{e.rowCount.toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
     </div>
     </AdminGuard>
   );
+}
+
+function formatLocal(iso: string): string {
+  try {
+    const d = new Date(iso);
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, "0");
+    const day = String(d.getDate()).padStart(2, "0");
+    const hh = String(d.getHours()).padStart(2, "0");
+    const mm = String(d.getMinutes()).padStart(2, "0");
+    return `${y}-${m}-${day} ${hh}:${mm}`;
+  } catch {
+    return iso;
+  }
 }
