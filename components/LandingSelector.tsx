@@ -64,6 +64,7 @@ export function LandingSelector() {
   const setSelectedCompany = useDataStore((s) => s.setSelectedCompany);
   const setCompanyChosen = useDataStore((s) => s.setCompanyChosen);
   const setIsAdmin = useDataStore((s) => s.setIsAdmin);
+  const isAdmin = useDataStore((s) => s.isAdmin);
   const router = useRouter();
 
   const [adminModalOpen, setAdminModalOpen] = useState(false);
@@ -77,7 +78,8 @@ export function LandingSelector() {
   };
 
   const handleClick = (c: Choice) => {
-    if (c.requiresPassword) {
+    // 이미 관리자 세션이면 비밀번호 다시 묻지 않음
+    if (c.requiresPassword && !isAdmin) {
       setAdminModalOpen(true);
       setPwdInput("");
       setPwdError("");
@@ -90,6 +92,9 @@ export function LandingSelector() {
     e.preventDefault();
     if (checkAdminPassword(pwdInput)) {
       setIsAdmin(true);
+      setAdminModalOpen(false);
+      setPwdInput("");
+      setPwdError("");
       enter("전체");
     } else {
       setPwdError("비밀번호가 올바르지 않습니다.");

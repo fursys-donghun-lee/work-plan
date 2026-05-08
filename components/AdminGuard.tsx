@@ -1,8 +1,7 @@
 "use client";
 
-import Link from "next/link";
-import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useHydrated } from "@/components/useComputed";
 import { checkAdminPassword } from "@/lib/admin";
@@ -14,6 +13,7 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
   const hydrated = useHydrated();
   const isAdmin = useDataStore((s) => s.isAdmin);
   const setIsAdmin = useDataStore((s) => s.setIsAdmin);
+  const setCompanyChosen = useDataStore((s) => s.setCompanyChosen);
   const router = useRouter();
 
   const [pwd, setPwd] = useState("");
@@ -30,6 +30,12 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
     } else {
       setError("비밀번호가 올바르지 않습니다.");
     }
+  };
+
+  const goBack = () => {
+    // 선택 화면으로 (companyChosen=false → RootGate 가 LandingSelector 렌더)
+    setCompanyChosen(false);
+    router.push("/");
   };
 
   return (
@@ -64,9 +70,13 @@ export function AdminGuard({ children }: { children: React.ReactNode }) {
           </div>
         )}
         <div className="flex gap-2 pt-1">
-          <Link href="/" className="btn btn-secondary flex-1 justify-center">
+          <button
+            type="button"
+            onClick={goBack}
+            className="btn btn-secondary flex-1 justify-center"
+          >
             돌아가기
-          </Link>
+          </button>
           <button type="submit" className="btn btn-primary flex-1 justify-center">
             확인
           </button>
