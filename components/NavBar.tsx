@@ -4,8 +4,8 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { cn } from "@/lib/utils";
 import { useDataStore } from "@/lib/store/useDataStore";
-import { COMPANY_OPTIONS, type Company } from "@/lib/types";
-import { Building2, Home } from "lucide-react";
+import { type Company } from "@/lib/types";
+import { Home } from "lucide-react";
 import { useHydrated } from "./useComputed";
 
 const NAV_ITEMS_BY_COMPANY: Record<Company, { href: string; label: string }[]> = {
@@ -32,24 +32,10 @@ export function NavBar() {
   const router = useRouter();
   const hydrated = useHydrated();
   const selectedCompany = useDataStore((s) => s.selectedCompany);
-  const setSelectedCompany = useDataStore((s) => s.setSelectedCompany);
   const setCompanyChosen = useDataStore((s) => s.setCompanyChosen);
-  const isAdmin = useDataStore((s) => s.isAdmin);
 
   const company = hydrated ? selectedCompany : "전체";
   const navItems = NAV_ITEMS_BY_COMPANY[company];
-
-  // 관리자 아니면 "전체" 옵션 숨김
-  const companyOptions = isAdmin
-    ? COMPANY_OPTIONS
-    : COMPANY_OPTIONS.filter((c) => c !== "전체");
-
-  const handleCompanyChange = (next: Company) => {
-    setSelectedCompany(next);
-    // 회사가 바뀌면 무조건 메인 대시보드로 이동
-    // (현재 페이지가 새 회사에서 사용되지 않을 수 있으므로 "사용 안 함" 화면 회피)
-    if (pathname !== "/") router.push("/");
-  };
 
   return (
     <nav className="bg-white border-b border-slate-200 sticky top-0 z-30 shadow-sm">
@@ -81,7 +67,7 @@ export function NavBar() {
           })}
         </div>
 
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto">
           <button
             type="button"
             onClick={() => {
@@ -94,18 +80,6 @@ export function NavBar() {
             <Home className="w-4 h-4" />
             선택 화면
           </button>
-          <Building2 className="w-4 h-4 text-slate-400 ml-2" />
-          <select
-            className="select py-1 pr-8 text-sm font-medium"
-            value={company}
-            onChange={(e) => handleCompanyChange(e.target.value as Company)}
-          >
-            {companyOptions.map((c) => (
-              <option key={c} value={c}>
-                {c}
-              </option>
-            ))}
-          </select>
         </div>
       </div>
     </nav>
