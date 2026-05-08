@@ -82,15 +82,48 @@ function sanitizeForFirestore(value: unknown): unknown {
   return value;
 }
 
+// "비어있다"로 간주되는 값 — 이런 값으로 로컬의 의미있는 값을 덮어쓰지 않음
+function isEmptyValue(v: unknown): boolean {
+  if (v === null || v === undefined) return true;
+  if (typeof v === "string" && v === "") return true;
+  if (Array.isArray(v) && v.length === 0) return true;
+  if (typeof v === "object" && v !== null && Object.keys(v as object).length === 0)
+    return true;
+  return false;
+}
+
+// 원격(Firestore) ← 로컬 병합.
+// 원격이 비어있고 로컬에 의미있는 값이 있으면 로컬 유지 (데이터 보존).
+// 둘 다 값이 있으면 원격을 우선 (최신 멀티유저 동기화).
+// 반환: { merged, preservedFromLocal: boolean }
+function mergePreserveLocal(
+  remote: Record<string, unknown>,
+  local: Record<string, unknown>
+): { merged: Record<string, unknown>; preservedFromLocal: boolean } {
+  const merged: Record<string, unknown> = {};
+  let preservedFromLocal = false;
+  for (const k of SYNCED_KEYS) {
+    const r = (remote as any)[k];
+    const l = (local as any)[k];
+    if (isEmptyValue(r) && !isEmptyValue(l)) {
+      merged[k] = l;
+      preservedFromLocal = true;
+    } else {
+      merged[k] = r;
+    }
+  }
+  return { merged, preservedFromLocal };
+}
+
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const [, setHydrated] = useState(false);
   const lastWriteRef = useRef<string>("");
   const ignoreNextRemoteRef = useRef<boolean>(false);
-  // 로컬 변경이 디바운스 큐에 있거나 쓰기 진행 중일 때 true.
-  // 이 동안 Firestore 에서 들어오는 snapshot 은 우리 변경을 덮어쓰면 안 되므로 무시.
+  // 로컬 변경이 디바운스/전송 진행 중. 이 동안 원격 snapshot 무시.
+  // (clear는 우리 자신의 write 가 snapshot 으로 돌아왔을 때만 — 또는 에러 시)
   const localPendingRef = useRef<boolean>(false);
 
-  // 1) Firestore 실시간 구독 (서버 → 클라이언트)
+  // 1) Firestore 실시간 구독
   useEffect(() => {
     if (!isFirebaseConfigured()) {
       console.warn(
@@ -126,24 +159,50 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        // 로컬 변경이 디바운스/전송 대기 중이면 원격 snapshot 무시 (덮어쓰기 방지)
+        // 로컬 변경이 디바운스/전송 진행 중이면 원격 snapshot 검사:
+        // - 우리 자신의 write 가 돌아왔으면 ack 처리 (pending 해제)
+        // - 그 외 stale snapshot 은 무시
+        const data = snap.data();
+        const synced = pickSynced(data);
+        const remoteBody = JSON.stringify(synced);
+
         if (localPendingRef.current) {
-          setHydrated(true);
+          if (remoteBody === lastWriteRef.current) {
+            localPendingRef.current = false;
+            setHydrated(true);
+          }
+          // 다른 stale snapshot 은 무시
           return;
         }
 
-        const data = snap.data();
-        const synced = pickSynced(data);
-        const body = JSON.stringify(synced);
-        // 우리가 방금 쓴 값이면 무시
+        // 비어있는 원격 값으로 로컬 의미있는 값을 덮어쓰지 않기
+        const local = useDataStore.getState() as unknown as Record<
+          string,
+          unknown
+        >;
+        const { merged, preservedFromLocal } = mergePreserveLocal(synced, local);
+        const body = JSON.stringify(merged);
+
         if (body === lastWriteRef.current) {
           setHydrated(true);
           return;
         }
+
         ignoreNextRemoteRef.current = true;
-        useDataStore.setState(synced as never, false);
+        useDataStore.setState(merged as never, false);
         lastWriteRef.current = body;
         setHydrated(true);
+
+        // 원격이 비어있어 로컬을 보존했다면, 그 값을 Firestore 에 다시 push
+        // (다음 사용자도 동일 데이터 보게 함)
+        if (preservedFromLocal) {
+          void setDoc(ref, {
+            ...(sanitizeForFirestore(merged) as Record<string, unknown>),
+            _updatedAt: serverTimestamp(),
+          }).catch((e) =>
+            console.warn("[SyncProvider] preserve-local push", e)
+          );
+        }
       },
       (err) => {
         console.warn("[SyncProvider] onSnapshot 에러", err);
@@ -168,6 +227,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       const synced = pickSynced(state);
       const body = JSON.stringify(synced);
       if (body === lastWriteRef.current) {
+        // 이미 같은 값이 서버에 있음 — pending 해제
         localPendingRef.current = false;
         return;
       }
@@ -182,22 +242,22 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           _updatedAt: serverTimestamp(),
         });
         lastWriteRef.current = body;
+        // pending 은 우리 자신의 snapshot 이 돌아올 때 onSnapshot 에서 해제
       } catch (e) {
         console.warn("[SyncProvider] write 실패", e);
+        // 실패 시 pending 해제 (안 그러면 영원히 막힘)
+        localPendingRef.current = false;
       } finally {
         inflight = false;
         if (pending) {
           pending = false;
           flush();
-        } else {
-          localPendingRef.current = false;
         }
       }
     };
 
     const unsub = useDataStore.subscribe((curr, prev) => {
       if (ignoreNextRemoteRef.current) {
-        // 원격에서 받은 변경이면 다시 쓰지 않음
         ignoreNextRemoteRef.current = false;
         return;
       }
@@ -209,7 +269,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       ) {
         return;
       }
-      // 로컬 변경 발생 → flush 끝날 때까지 원격 snapshot 무시
+      // 로컬 변경 → flush 끝나고 snapshot ack 받을 때까지 원격 무시
       localPendingRef.current = true;
       if (timer) clearTimeout(timer);
       timer = setTimeout(flush, 800);
