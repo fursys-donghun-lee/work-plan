@@ -33,6 +33,8 @@ interface DataState {
   selectedCompany: Company;
   // 시작화면(랜딩 선택)에서 회사를 골랐는지 여부 — false면 selector 화면을 보여줌
   companyChosen: boolean;
+  // 관리자 비밀번호 통과 여부 (세션 단위, 새로고침 시 초기화)
+  isAdmin: boolean;
 
   // 기준자료
   employees: Employee[];
@@ -78,6 +80,7 @@ interface DataState {
   // Actions
   setSelectedCompany: (company: Company) => void;
   setCompanyChosen: (chosen: boolean) => void;
+  setIsAdmin: (b: boolean) => void;
   setEmployees: (data: Employee[], meta: UploadMeta) => void;
   setEquipment: (data: Equipment[], meta: UploadMeta) => void;
   setLoadBar: (data: LoadBarInfo[], meta: UploadMeta) => void;
@@ -146,6 +149,7 @@ export const useDataStore = create<DataState>()(
     (set) => ({
       selectedCompany: "전체" as Company,
       companyChosen: false,
+      isAdmin: false,
       employees: [],
       equipment: [],
       workGroups: DEFAULT_WORK_GROUPS,
@@ -180,6 +184,7 @@ export const useDataStore = create<DataState>()(
 
       setSelectedCompany: (company) => set({ selectedCompany: company }),
       setCompanyChosen: (chosen) => set({ companyChosen: chosen }),
+      setIsAdmin: (b) => set({ isAdmin: b }),
       setEmployees: (data, meta) => set({ employees: data, workStandardMeta: meta }),
       setEquipment: (data, meta) => set({ equipment: data, equipmentMeta: meta }),
       setLoadBar: (data, meta) => set({ loadBar: data, loadBarMeta: meta }),
@@ -443,10 +448,15 @@ export const useDataStore = create<DataState>()(
     {
       name: "woosung-dashboard-store",
       version: 1,
-      // companyChosen은 매 페이지 진입마다 초기 화면(selector)을 띄우기 위해 persist 제외
+      // companyChosen / isAdmin 은 세션 단위 → 새로고침 시 초기화 (persist 제외)
       partialize: (state) => {
-        const { companyChosen: _companyChosen, ...rest } = state;
+        const {
+          companyChosen: _companyChosen,
+          isAdmin: _isAdmin,
+          ...rest
+        } = state;
         void _companyChosen;
+        void _isAdmin;
         return rest;
       },
     }

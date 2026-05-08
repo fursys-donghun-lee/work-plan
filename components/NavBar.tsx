@@ -34,9 +34,15 @@ export function NavBar() {
   const selectedCompany = useDataStore((s) => s.selectedCompany);
   const setSelectedCompany = useDataStore((s) => s.setSelectedCompany);
   const setCompanyChosen = useDataStore((s) => s.setCompanyChosen);
+  const isAdmin = useDataStore((s) => s.isAdmin);
 
   const company = hydrated ? selectedCompany : "전체";
   const navItems = NAV_ITEMS_BY_COMPANY[company];
+
+  // 관리자 아니면 "전체" 옵션 숨김
+  const companyOptions = isAdmin
+    ? COMPANY_OPTIONS
+    : COMPANY_OPTIONS.filter((c) => c !== "전체");
 
   const handleCompanyChange = (next: Company) => {
     setSelectedCompany(next);
@@ -94,7 +100,7 @@ export function NavBar() {
             value={company}
             onChange={(e) => handleCompanyChange(e.target.value as Company)}
           >
-            {COMPANY_OPTIONS.map((c) => (
+            {companyOptions.map((c) => (
               <option key={c} value={c}>
                 {c}
               </option>

@@ -8,6 +8,7 @@ import { parsePaintPlan } from "@/lib/excel/paintPlan";
 import { parsePackageLoad } from "@/lib/excel/packageLoad";
 import { parseUrgentProduction } from "@/lib/excel/urgentProduction";
 import { useHydrated } from "@/components/useComputed";
+import { AdminGuard } from "@/components/AdminGuard";
 import Link from "next/link";
 
 export default function UploadPage() {
@@ -89,6 +90,7 @@ export default function UploadPage() {
   };
 
   return (
+    <AdminGuard>
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">일일자료 업로드</h1>
@@ -172,5 +174,6 @@ export default function UploadPage() {
         </div>
       </div>
     </div>
+    </AdminGuard>
   );
 }

@@ -4,6 +4,8 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { Database, Upload, FileSpreadsheet } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useDataStore } from "@/lib/store/useDataStore";
+import { useHydrated } from "@/components/useComputed";
 
 const COMMON_ITEMS = [
   {
@@ -22,6 +24,15 @@ const COMMON_ITEMS = [
 
 export function Sidebar() {
   const pathname = usePathname();
+  const hydrated = useHydrated();
+  const isAdmin = useDataStore((s) => s.isAdmin);
+
+  // 관리자만 기준자료/일일자료 메뉴를 볼 수 있음
+  if (!hydrated || !isAdmin) {
+    return (
+      <aside className="w-60 bg-white border-r border-slate-200 flex-shrink-0 min-h-[calc(100vh-3.5rem)] sticky top-14" />
+    );
+  }
 
   return (
     <aside className="w-60 bg-white border-r border-slate-200 flex-shrink-0 min-h-[calc(100vh-3.5rem)] sticky top-14">

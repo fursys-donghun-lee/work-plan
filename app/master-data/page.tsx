@@ -18,6 +18,7 @@ import {
   exportWorkStandard,
 } from "@/lib/excel/export";
 import { useHydrated } from "@/components/useComputed";
+import { AdminGuard } from "@/components/AdminGuard";
 import { LoadBarTable } from "@/components/LoadBarTable";
 import { PackagePositionTable } from "@/components/PackagePositionTable";
 import { LineBaseTable } from "@/components/LineBaseTable";
@@ -102,6 +103,7 @@ export default function MasterDataPage() {
   };
 
   return (
+    <AdminGuard>
     <div className="space-y-6">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">기준자료</h1>
@@ -218,6 +220,7 @@ export default function MasterDataPage() {
         </Link>
       </div>
     </div>
+    </AdminGuard>
   );
 }
 
