@@ -3,6 +3,7 @@ import "./globals.css";
 import { SyncProvider } from "@/components/SyncProvider";
 import { RootGate } from "@/components/RootGate";
 import { AdminSession } from "@/components/AdminSession";
+import { HistoryGuard } from "@/components/HistoryGuard";
 
 export const metadata: Metadata = {
   title: "안성공장 일일 근무계획",
@@ -20,6 +21,7 @@ export default function RootLayout({
     <html lang="ko">
       <body className="min-h-screen">
         <AdminSession />
+        <HistoryGuard />
         <SyncProvider>
           <RootGate>{children}</RootGate>
         </SyncProvider>
