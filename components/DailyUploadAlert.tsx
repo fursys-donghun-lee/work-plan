@@ -29,6 +29,7 @@ function isToday(iso: string | undefined): boolean {
 
 export function DailyUploadAlert() {
   const hydrated = useHydrated();
+  const isAdmin = useDataStore((s) => s.isAdmin);
   const attendanceMeta = useDataStore((s) => s.attendanceMeta);
   const loadPlanMeta = useDataStore((s) => s.loadPlanMeta);
   const paintPlanMeta = useDataStore((s) => s.paintPlanMeta);
@@ -36,6 +37,8 @@ export function DailyUploadAlert() {
   const urgentProductionMeta = useDataStore((s) => s.urgentProductionMeta);
 
   if (!hydrated) return null;
+  // 관리자에게만 노출 (현장 관리자는 업로드 권한 없음)
+  if (!isAdmin) return null;
 
   const checks: UploadCheck[] = [
     { label: "근태", uploadedAt: attendanceMeta?.uploadedAt },
@@ -51,7 +54,7 @@ export function DailyUploadAlert() {
   return (
     <Link
       href="/upload"
-      className="block bg-rose-600 hover:bg-rose-700 text-white font-semibold rounded-lg px-4 py-3 shadow transition-colors"
+      className="block bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold rounded-lg px-4 py-3 border border-amber-300 transition-colors"
     >
       <span className="text-base">
         ⛔ {missing.map((m) => m.label).join(" ")} 업로드 필요

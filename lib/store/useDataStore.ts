@@ -461,11 +461,16 @@ export const useDataStore = create<DataState>()(
     {
       name: "woosung-dashboard-store",
       version: 1,
-      // isAdmin 만 세션 단위 (sessionStorage 로 별도 관리, 탭 닫으면 초기화).
-      // companyChosen / selectedCompany 는 localStorage 에 그대로 유지 →
-      //   사용자가 명시적으로 "선택 화면" 버튼을 누르기 전까진 같은 화면 유지.
+      // companyChosen / isAdmin 은 persist 제외:
+      // - companyChosen: 페이지 진입(새로고침/새탭)마다 선택화면부터 시작
+      // - isAdmin: sessionStorage 로 탭 단위 관리 (AdminSession)
       partialize: (state) => {
-        const { isAdmin: _isAdmin, ...rest } = state;
+        const {
+          companyChosen: _companyChosen,
+          isAdmin: _isAdmin,
+          ...rest
+        } = state;
+        void _companyChosen;
         void _isAdmin;
         return rest;
       },

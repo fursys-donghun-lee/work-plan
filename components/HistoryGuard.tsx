@@ -14,25 +14,15 @@ export function HistoryGuard() {
   useEffect(() => {
     if (typeof window === "undefined") return;
 
-    // 초기 동기화 — localStorage 의 companyChosen 와 URL hash 를 일치시킴
-    const syncInitial = () => {
-      const hasHash = window.location.hash === DASH_HASH;
-      const chosen = useDataStore.getState().companyChosen;
-      if (chosen && !hasHash) {
-        window.history.replaceState(
-          null,
-          "",
-          window.location.pathname + window.location.search + DASH_HASH
-        );
-      } else if (!chosen && hasHash) {
-        window.history.replaceState(
-          null,
-          "",
-          window.location.pathname + window.location.search
-        );
-      }
-    };
-    syncInitial();
+    // 페이지 최초 진입 시 — URL 의 stale #a 해시를 무조건 제거.
+    // (companyChosen 은 매 진입마다 false 로 시작하므로 선택화면부터 보여줌)
+    if (window.location.hash === DASH_HASH) {
+      window.history.replaceState(
+        null,
+        "",
+        window.location.pathname + window.location.search
+      );
+    }
 
     // 브라우저 back/forward 시 hash 상태에 따라 chosen 동기화
     const handler = () => {
