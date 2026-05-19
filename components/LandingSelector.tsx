@@ -7,7 +7,6 @@ import type { Company } from "@/lib/types";
 import { Lock, Package, Settings } from "lucide-react";
 import { PowderCoatingIcon, WeldingHelmetIcon } from "@/components/CompanyIcons";
 import { checkAdminPassword } from "@/lib/admin";
-import { DASH_HASH } from "@/components/HistoryGuard";
 
 type Choice = {
   label: string;
@@ -75,14 +74,6 @@ export function LandingSelector() {
   const enter = (company: Company) => {
     setSelectedCompany(company);
     setCompanyChosen(true);
-    // history 엔트리 추가 → back 버튼 누를 시 사이트 종료가 아닌 선택화면 복귀
-    if (typeof window !== "undefined" && window.location.hash !== DASH_HASH) {
-      window.history.pushState(
-        null,
-        "",
-        window.location.pathname + window.location.search + DASH_HASH
-      );
-    }
     if (router && typeof window !== "undefined" && window.location.pathname !== "/") {
       router.push("/");
     }

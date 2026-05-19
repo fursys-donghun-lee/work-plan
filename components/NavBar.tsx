@@ -7,7 +7,6 @@ import { useDataStore } from "@/lib/store/useDataStore";
 import { type Company } from "@/lib/types";
 import { Home } from "lucide-react";
 import { useHydrated } from "./useComputed";
-import { DASH_HASH } from "@/components/HistoryGuard";
 
 const NAV_ITEMS_BY_COMPANY: Record<Company, { href: string; label: string }[]> = {
   전체: [{ href: "/", label: "안성공장 통합 대시보드" }],
@@ -73,17 +72,6 @@ export function NavBar() {
             type="button"
             onClick={() => {
               setCompanyChosen(false);
-              // URL hash 제거 (history.replaceState — 새 엔트리 추가 안 함)
-              if (
-                typeof window !== "undefined" &&
-                window.location.hash === DASH_HASH
-              ) {
-                window.history.replaceState(
-                  null,
-                  "",
-                  window.location.pathname + window.location.search
-                );
-              }
               if (pathname !== "/") router.push("/");
             }}
             className="flex items-center gap-1 px-2.5 py-1.5 rounded-md text-sm text-slate-600 hover:bg-slate-100"
