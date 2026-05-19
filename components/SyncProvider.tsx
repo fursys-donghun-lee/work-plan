@@ -107,6 +107,18 @@ const META_PAIRS: { data: string; meta: string }[] = [
   { data: "urgentProduction", meta: "urgentProductionMeta" },
 ];
 
+// setState 에 undefined 가 들어가면 store 의 기존 값이 undefined 로 덮여 컴포넌트가
+// 터질 수 있음 → 항상 undefined 키 제거 후 setState.
+function stripUndefined(
+  obj: Record<string, unknown>
+): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(obj)) {
+    if (v !== undefined) out[k] = v;
+  }
+  return out;
+}
+
 function getMetaTime(meta: unknown): number {
   if (!meta || typeof meta !== "object") return 0;
   const at = (meta as { uploadedAt?: string }).uploadedAt;
@@ -126,9 +138,16 @@ function mergePreserveLocal(
   const merged: Record<string, unknown> = {};
   let preservedFromLocal = false;
 
-  // 1. 일단 모든 필드를 원격 기본값으로
+  // 1. 모든 필드를 원격 → 로컬 순으로 채우기.
+  //    원격에 undefined 면 로컬 값으로 폴백 (undefined 가 setState 되어 컴포넌트 터지는 것 방지)
   for (const k of SYNCED_KEYS) {
-    merged[k] = (remote as any)[k];
+    const r = (remote as any)[k];
+    if (r !== undefined) {
+      merged[k] = r;
+    } else {
+      merged[k] = (local as any)[k];
+      if ((local as any)[k] !== undefined) preservedFromLocal = true;
+    }
   }
 
   // 2. data+meta 쌍은 uploadedAt 비교
@@ -136,8 +155,10 @@ function mergePreserveLocal(
     const localTime = getMetaTime((local as any)[meta]);
     const remoteTime = getMetaTime((remote as any)[meta]);
     if (localTime > remoteTime) {
-      merged[data] = (local as any)[data];
-      merged[meta] = (local as any)[meta];
+      const ld = (local as any)[data];
+      const lm = (local as any)[meta];
+      if (ld !== undefined) merged[data] = ld;
+      if (lm !== undefined) merged[meta] = lm;
       preservedFromLocal = true;
     }
   }
@@ -146,12 +167,13 @@ function mergePreserveLocal(
   {
     const localTime = getMetaTime((local as any).attendanceMeta);
     const remoteTime = getMetaTime((remote as any).attendanceMeta);
-    if (localTime > remoteTime) {
-      merged.workDate = (local as any).workDate;
+    const lwd = (local as any).workDate;
+    if (localTime > remoteTime && lwd !== undefined) {
+      merged.workDate = lwd;
     }
   }
 
-  // 4. 그 외 필드 — 원격이 비어있으면 로컬 보존
+  // 4. 그 외 필드 — 결과가 비어있고 로컬에 있으면 로컬 보존
   for (const k of SYNCED_KEYS) {
     if (isEmptyValue(merged[k]) && !isEmptyValue((local as any)[k])) {
       merged[k] = (local as any)[k];
@@ -236,7 +258,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         }
 
         ignoreNextRemoteRef.current = true;
-        useDataStore.setState(merged as never, false);
+        useDataStore.setState(stripUndefined(merged) as never, false);
         lastWriteRef.current = body;
         setHydrated(true);
 
@@ -325,7 +347,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         const mergedBody = JSON.stringify(merged);
         if (mergedBody !== localBody) {
           ignoreNextRemoteRef.current = true;
-          useDataStore.setState(merged as never, false);
+          useDataStore.setState(stripUndefined(merged) as never, false);
         }
 
         // 6) Firestore 에 merged 푸시
