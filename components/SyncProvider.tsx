@@ -5,6 +5,7 @@ import { useDataStore } from "@/lib/store/useDataStore";
 import { getDb, isFirebaseConfigured } from "@/lib/firebase";
 import {
   doc,
+  getDoc,
   onSnapshot,
   setDoc,
   serverTimestamp,
@@ -268,12 +269,21 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     let inflight = false;
     let pending = false;
 
+    // 비-meta 필드(사용자 편집 필드) — 로컬 변경 감지로 충돌 방지
+    const NON_META_FIELDS = SYNCED_KEYS.filter(
+      (k) =>
+        !META_PAIRS.some((p) => p.data === k || p.meta === k) &&
+        k !== "workDate"
+    );
+
     const flush = async () => {
-      const state = useDataStore.getState() as unknown as Record<string, unknown>;
-      const synced = pickSynced(state);
-      const body = JSON.stringify(synced);
-      if (body === lastWriteRef.current) {
-        // 이미 같은 값이 서버에 있음 — pending 해제
+      const localState = useDataStore.getState() as unknown as Record<
+        string,
+        unknown
+      >;
+      const localSynced = pickSynced(localState);
+      const localBody = JSON.stringify(localSynced);
+      if (localBody === lastWriteRef.current) {
         localPendingRef.current = false;
         return;
       }
@@ -283,15 +293,49 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       }
       inflight = true;
       try {
+        // 1) 마지막으로 sync 된 값 복원 (변경 감지 기준점)
+        let lastWritten: Record<string, unknown> = {};
+        if (lastWriteRef.current) {
+          try {
+            lastWritten = JSON.parse(lastWriteRef.current);
+          } catch {}
+        }
+
+        // 2) Firestore 의 현재 최신 상태 가져오기
+        const snap = await getDoc(ref);
+        const remoteSynced: Record<string, unknown> = snap.exists()
+          ? pickSynced(snap.data() as Record<string, unknown>)
+          : {};
+
+        // 3) meta 시각 기반 병합 (paired data+meta + workDate)
+        const { merged } = mergePreserveLocal(remoteSynced, localSynced);
+
+        // 4) 비-meta(사용자 편집) 필드: 로컬에서 변경된 항목만 덮어쓰기,
+        //    아니면 원격 최신값 유지
+        for (const k of NON_META_FIELDS) {
+          const localChanged =
+            JSON.stringify((localSynced as any)[k]) !==
+            JSON.stringify((lastWritten as any)[k]);
+          if (localChanged) {
+            merged[k] = (localSynced as any)[k];
+          }
+        }
+
+        // 5) merged 가 로컬과 다르면 로컬에 적용 (원격에서 가져온 새 필드 반영)
+        const mergedBody = JSON.stringify(merged);
+        if (mergedBody !== localBody) {
+          ignoreNextRemoteRef.current = true;
+          useDataStore.setState(merged as never, false);
+        }
+
+        // 6) Firestore 에 merged 푸시
         await setDoc(ref, {
-          ...(sanitizeForFirestore(synced) as Record<string, unknown>),
+          ...(sanitizeForFirestore(merged) as Record<string, unknown>),
           _updatedAt: serverTimestamp(),
         });
-        lastWriteRef.current = body;
-        // pending 은 우리 자신의 snapshot 이 돌아올 때 onSnapshot 에서 해제
+        lastWriteRef.current = mergedBody;
       } catch (e) {
         console.warn("[SyncProvider] write 실패", e);
-        // 실패 시 pending 해제 (안 그러면 영원히 막힘)
         localPendingRef.current = false;
       } finally {
         inflight = false;
