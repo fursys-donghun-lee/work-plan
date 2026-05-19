@@ -56,9 +56,7 @@ export function DailyUploadAlert() {
       href="/upload"
       className="block bg-amber-100 hover:bg-amber-200 text-amber-900 font-semibold rounded-lg px-4 py-3 border border-amber-300 transition-colors"
     >
-      <span className="text-base">
-        ⛔ {missing.map((m) => m.label).join(" ")} 업로드 필요
-      </span>
+      <span className="text-base">⛔일일자료 업로드 필요</span>
     </Link>
   );
 }
