@@ -552,6 +552,12 @@ export function CompanyMainDashboard({ company }: Props) {
           tone={totalOvertime > 0 ? "red" : "gray"}
         />
         <SummaryCard
+          icon={<CheckCircle2 />}
+          label="잔업확정"
+          value={totalOvertimeConfirmed}
+          tone={totalOvertimeConfirmed > 0 ? "blue" : "gray"}
+        />
+        <SummaryCard
           icon={<ArrowRightLeft />}
           label="지원"
           value={
@@ -562,12 +568,6 @@ export function CompanyMainDashboard({ company }: Props) {
                 : "0"
           }
           tone={totalSupportNet !== 0 ? "blue" : "gray"}
-        />
-        <SummaryCard
-          icon={<CheckCircle2 />}
-          label="최종가용"
-          value={totalFinalAvailable}
-          tone="green"
         />
       </div>
 
