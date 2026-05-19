@@ -92,26 +92,72 @@ function isEmptyValue(v: unknown): boolean {
   return false;
 }
 
+// 업로드 자료(data) ↔ 메타(meta) 쌍. meta.uploadedAt 시각으로 newer 쪽 우선.
+const META_PAIRS: { data: string; meta: string }[] = [
+  { data: "employees", meta: "workStandardMeta" },
+  { data: "equipment", meta: "equipmentMeta" },
+  { data: "loadBar", meta: "loadBarMeta" },
+  { data: "packagePosition", meta: "packagePositionMeta" },
+  { data: "lineBase", meta: "lineBaseMeta" },
+  { data: "attendance", meta: "attendanceMeta" },
+  { data: "loadPlan", meta: "loadPlanMeta" },
+  { data: "paintPlan", meta: "paintPlanMeta" },
+  { data: "packageLoad", meta: "packageLoadMeta" },
+  { data: "urgentProduction", meta: "urgentProductionMeta" },
+];
+
+function getMetaTime(meta: unknown): number {
+  if (!meta || typeof meta !== "object") return 0;
+  const at = (meta as { uploadedAt?: string }).uploadedAt;
+  if (!at) return 0;
+  const t = new Date(at).getTime();
+  return Number.isFinite(t) ? t : 0;
+}
+
 // 원격(Firestore) ← 로컬 병합.
-// 원격이 비어있고 로컬에 의미있는 값이 있으면 로컬 유지 (데이터 보존).
-// 둘 다 값이 있으면 원격을 우선 (최신 멀티유저 동기화).
-// 반환: { merged, preservedFromLocal: boolean }
+// 1) data+meta 쌍은 meta.uploadedAt 비교 → newer 쪽 채택
+// 2) workDate 는 attendanceMeta 와 같은 쪽
+// 3) 그 외 필드: 원격이 비어있고 로컬에 있으면 로컬 보존 (멀티유저 동기화 손실 방지)
 function mergePreserveLocal(
   remote: Record<string, unknown>,
   local: Record<string, unknown>
 ): { merged: Record<string, unknown>; preservedFromLocal: boolean } {
   const merged: Record<string, unknown> = {};
   let preservedFromLocal = false;
+
+  // 1. 일단 모든 필드를 원격 기본값으로
   for (const k of SYNCED_KEYS) {
-    const r = (remote as any)[k];
-    const l = (local as any)[k];
-    if (isEmptyValue(r) && !isEmptyValue(l)) {
-      merged[k] = l;
+    merged[k] = (remote as any)[k];
+  }
+
+  // 2. data+meta 쌍은 uploadedAt 비교
+  for (const { data, meta } of META_PAIRS) {
+    const localTime = getMetaTime((local as any)[meta]);
+    const remoteTime = getMetaTime((remote as any)[meta]);
+    if (localTime > remoteTime) {
+      merged[data] = (local as any)[data];
+      merged[meta] = (local as any)[meta];
       preservedFromLocal = true;
-    } else {
-      merged[k] = r;
     }
   }
+
+  // 3. workDate 는 attendanceMeta 따라가기
+  {
+    const localTime = getMetaTime((local as any).attendanceMeta);
+    const remoteTime = getMetaTime((remote as any).attendanceMeta);
+    if (localTime > remoteTime) {
+      merged.workDate = (local as any).workDate;
+    }
+  }
+
+  // 4. 그 외 필드 — 원격이 비어있으면 로컬 보존
+  for (const k of SYNCED_KEYS) {
+    if (isEmptyValue(merged[k]) && !isEmptyValue((local as any)[k])) {
+      merged[k] = (local as any)[k];
+      preservedFromLocal = true;
+    }
+  }
+
   return { merged, preservedFromLocal };
 }
 

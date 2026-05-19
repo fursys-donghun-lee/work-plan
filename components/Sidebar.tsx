@@ -27,12 +27,8 @@ export function Sidebar() {
   const hydrated = useHydrated();
   const isAdmin = useDataStore((s) => s.isAdmin);
 
-  // 관리자만 기준자료/일일자료 메뉴를 볼 수 있음
-  if (!hydrated || !isAdmin) {
-    return (
-      <aside className="w-60 bg-white border-r border-slate-200 flex-shrink-0 min-h-[calc(100vh-3.5rem)] sticky top-14" />
-    );
-  }
+  // 관리자만 기준자료/일일자료 메뉴를 볼 수 있음 (비관리자는 사이드바 전체 숨김)
+  if (!hydrated || !isAdmin) return null;
 
   return (
     <aside className="w-60 bg-white border-r border-slate-200 flex-shrink-0 min-h-[calc(100vh-3.5rem)] sticky top-14">
