@@ -73,19 +73,20 @@ export interface ReallocResult {
   totalPeople: number; // 직접 출근인원
   totalCarry: number; // 다음날 이월 부하 (인시)
   availableLoad: number; // 가용부하 = 인원 × 정규8h (인시)
-  idleHours: number; // 유휴 시간 (정규시간 내 안 쓰인 인력, 인시)
-  overtimePeople: number; // 잔업인원
+  workHours: number; // 작업시간 = 정규시간 내 실제 투입 인시
+  idleHours: number; // 유휴 시간 (정규 미투입 + 잔업 중 노는 시간, 인시)
+  overtimePeople: number; // 잔업인원 (잔업 2h 이상 라인만)
   overtimePersonHours: number; // 잔업시간 (인시)
 }
 
 const EPS = 1e-6;
 
-// 세그먼트 기반 메트릭 (투입/잔업/유휴)
+// 세그먼트 기반 메트릭 (작업시간/잔업/유휴)
 //
-// 유휴 = 가용부하(인원×정규8h) − 정규시간 내 실제 투입 인시
-//   · 투입 = 라인에 사람이 들어가 부하를 소진한 모든 인시 (1명도 포함)
-//   · 인원 기준이라, 끝난 인원이 다른 라인에 가서 일하면 유휴로 안 잡힘
-//   · 부하를 안 깎은 시간(작업 전 대기·종료 후·잉여)만 유휴로 남음
+// · 작업시간 = 정규시간 내 실제 투입 인시 (1명도 포함)
+// · 유휴 = (가용부하 − 작업시간) + 잔업 중 노는 시간
+//     - 잔업 투입된 인원이 21:00 전에 끝나면 남는 시간도 유휴로 봄
+// · 잔업인원 = 잔업 작업시간이 2h 이상인 라인의 인원만 (그 미만은 0)
 function computeMetrics(
   groups: { segments: ReallocSegment[] }[],
   startTime: number,
@@ -94,36 +95,56 @@ function computeMetrics(
   totalPeople: number
 ): {
   availableLoad: number;
+  workHours: number;
   idleHours: number;
   overtimePeople: number;
   overtimePersonHours: number;
 } {
   const otStart = startTime + standardHours;
   let regularWork = 0; // 정규시간 내 실제 투입 인시 (1명 포함)
-  let otWork = 0;
-  let overtimePeople = 0;
+  let otWork = 0; // 잔업 작업 인시 (전체)
+  let overtimePeople = 0; // 잔업인원 (라인 잔업 2h 이상만)
+  let otPeople = 0; // 잔업 진입 인원 (work-time 8 경계를 넘긴 인원)
+  let otOperationEnd = otStart; // 마지막 잔업 작업 종료(work-time) = 잔업 종료시각
   for (const g of groups) {
-    let maxOtHc = 0;
+    let maxOtHc = 0; // 이 라인 잔업 최대 인원
+    let otEndLine = otStart; // 이 라인 잔업 작업 마지막 종료(work-time)
     for (const seg of g.segments) {
       const h = seg.base + seg.added;
       // 정규시간 내 투입 인시
       const hi = Math.min(seg.end, otStart);
       const lo = Math.max(seg.start, startTime);
       if (hi > lo) regularWork += (hi - lo) * h;
-      // 잔업 인시/인원 (실제 잔업 투입 기준)
+      // 잔업 작업 인시
       const otHi = Math.min(seg.end, maxTime);
       const otLo = Math.max(seg.start, otStart);
       if (otHi > otLo) {
         otWork += (otHi - otLo) * h;
         maxOtHc = Math.max(maxOtHc, h);
+        otEndLine = Math.max(otEndLine, otHi);
+        otOperationEnd = Math.max(otOperationEnd, otHi);
+      }
+      // 잔업 진입 인원: work-time 8 경계를 지나는 세그먼트의 인원 (각 1회만)
+      if (seg.start <= otStart + EPS && seg.end > otStart + EPS) {
+        otPeople += h;
       }
     }
-    overtimePeople += maxOtHc;
+    // 잔업인원: 잔업 작업시간이 2h 이상인 라인만 카운트
+    if (maxOtHc > 0 && otEndLine - otStart >= 2 - EPS) {
+      overtimePeople += maxOtHc;
+    }
   }
+  // 잔업 유휴(인원 기준): 잔업 진입 인원이 잔업 종료시각까지 일하지 않은 시간
+  //  · 다른 라인으로 옮겨 일하면 그쪽 작업으로 잡혀 유휴 아님 (인원 기준)
+  const overtimeIdle =
+    otPeople > 0
+      ? Math.max(0, otPeople * (otOperationEnd - otStart) - otWork)
+      : 0;
   const availableLoad = totalPeople * standardHours;
-  const idleHours = Math.max(0, availableLoad - regularWork);
+  const idleHours = Math.max(0, availableLoad - regularWork) + overtimeIdle;
   return {
     availableLoad: Math.round(availableLoad * 2) / 2,
+    workHours: Math.round(regularWork * 2) / 2,
     idleHours: Math.round(idleHours * 2) / 2,
     overtimePeople,
     overtimePersonHours: Math.round(otWork * 2) / 2,

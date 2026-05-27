@@ -8,6 +8,7 @@ import {
   splitWorkSegment,
   workTimeToWall,
   STANDARD_WORKTIME,
+  MAX_WORKTIME,
   type ReallocGroupInput,
   type ReallocExtraFree,
 } from "@/lib/calc/reallocation";
@@ -39,10 +40,10 @@ export function ReallocationPlan({
   const loadedGroups = groups.filter((g) => g.loadHours > 0.01);
   if (loadedGroups.length === 0) return null;
 
-  // 인력 가동률 = 실제 투입 인시 / 가용 인시 = (가용 − 유휴) / 가용
+  // 인력 가동률 = 정규 작업시간 / 가용 인시
   const utilization =
     result.availableLoad > 0
-      ? ((result.availableLoad - result.idleHours) / result.availableLoad) * 100
+      ? (result.workHours / result.availableLoad) * 100
       : 0;
 
   // 간트 축: 하루 전체 고정 (08:30 ~ 21:00) — 블록 그리드 일관성
@@ -107,7 +108,7 @@ export function ReallocationPlan({
       {open && (
         <div className="mt-4 space-y-5">
           {/* 요약 지표 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
             {[
               {
                 label: "직접 출근인원",
@@ -120,14 +121,19 @@ export function ReallocationPlan({
                 tone: "blue" as const,
               },
               {
+                label: "작업시간",
+                value: `${result.workHours.toFixed(1)}인시`,
+                tone: "blue" as const,
+              },
+              {
+                label: "유휴시간",
+                value: `${result.idleHours.toFixed(1)}인시`,
+                tone: result.idleHours > 0.01 ? ("rose" as const) : ("slate" as const),
+              },
+              {
                 label: "인력 가동률",
                 value: `${utilization.toFixed(0)}%`,
                 tone: "emerald" as const,
-              },
-              {
-                label: "유휴 시간",
-                value: `${result.idleHours.toFixed(1)}인시`,
-                tone: result.idleHours > 0.01 ? ("rose" as const) : ("slate" as const),
               },
               {
                 label: "이월시간",
@@ -223,16 +229,23 @@ export function ReallocationPlan({
                     <div className="flex-1 relative h-6 bg-slate-50 rounded overflow-hidden">
                       {/* 휴게 음영 + 블록 경계선 (배경) */}
                       {trackBackground}
-                      {/* 유휴(노는 시간) — 정규시간 내 아무도 투입 안 된 구간을 연한 빨강으로
-                          (작업 전 대기 · 라인 종료 후 모두 포함) */}
+                      {/* 유휴(노는 시간) — 사람이 투입되지 않은 구간을 연한 빨강으로
+                          · 정규시간 내 미투입 (작업 전 대기 · 종료 후)
+                          · 잔업에 들어간 라인은 21:00까지 비는 시간도 유휴 */}
                       {(() => {
                         const REG = STANDARD_WORKTIME; // 정규 8h
-                        // 정규시간 내 사람이 투입된 구간을 모아 그 보색(=유휴 갭) 계산
+                        // 잔업까지 일한 라인이면 21:00(MAX_WORKTIME)까지, 아니면 17:30까지를 대상
+                        const maxEnd = t.segments.reduce(
+                          (mx, s) => (s.base + s.added > 0 ? Math.max(mx, s.end) : mx),
+                          0
+                        );
+                        const limit = maxEnd > REG + 1e-9 ? MAX_WORKTIME : REG;
+                        // 사람이 투입된 구간을 모아 그 보색(=유휴 갭) 계산
                         const staffed = t.segments
                           .filter((s) => s.base + s.added > 0)
                           .map((s) => ({
                             start: Math.max(0, s.start),
-                            end: Math.min(REG, s.end),
+                            end: Math.min(limit, s.end),
                           }))
                           .filter((s) => s.end > s.start + 1e-9)
                           .sort((a, b) => a.start - b.start);
@@ -243,7 +256,7 @@ export function ReallocationPlan({
                             gaps.push({ start: cur, end: s.start });
                           cur = Math.max(cur, s.end);
                         }
-                        if (cur < REG - 1e-9) gaps.push({ start: cur, end: REG });
+                        if (cur < limit - 1e-9) gaps.push({ start: cur, end: limit });
                         return gaps.flatMap((gp, gi) =>
                           splitWorkSegment(gp.start, gp.end).map((w, wi) => (
                             <div

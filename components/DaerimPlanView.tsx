@@ -14,8 +14,8 @@ import {
 } from "@/lib/calc/reallocation";
 import { cn } from "@/lib/utils";
 
-const utilOf = (r: { availableLoad: number; idleHours: number }) =>
-  r.availableLoad > 0 ? ((r.availableLoad - r.idleHours) / r.availableLoad) * 100 : 0;
+const utilOf = (r: { availableLoad: number; workHours: number }) =>
+  r.availableLoad > 0 ? (r.workHours / r.availableLoad) * 100 : 0;
 
 // 재배치 계획 비교 탭: 기본 배치(이동 없음) vs 재배치 로직 두 간트를 위·아래로 표시
 export function DaerimPlanView() {
