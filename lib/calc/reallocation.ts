@@ -40,7 +40,8 @@ export interface ReallocMove {
 export interface ReallocSegment {
   start: number;
   end: number;
-  headcount: number;
+  base: number; // 기존(해당 라인 원래) 인원
+  added: number; // 이동되어 추가된 인원
 }
 
 export interface ReallocGroupTimeline {
@@ -51,6 +52,11 @@ export interface ReallocGroupTimeline {
   finishTime: number | null; // 부하 없으면 null, 이월이면 null
   carryHours: number; // 21:00까지 못 끝낸 이월 부하(인시)
   urgent: boolean;
+}
+
+// 30분 단위 반올림
+function round30(h: number): number {
+  return Math.round(h * 2) / 2;
 }
 
 export interface ReallocResult {
@@ -75,16 +81,19 @@ export function computeReallocation(
   extraFree: ReallocExtraFree[] = []
 ): ReallocResult {
   const standardEnd = startTime + standardHours;
+  const STEP = 0.5; // 30분 단위 시뮬레이션
 
   interface G {
     name: string;
     loadHours: number;
     remaining: number;
-    headcount: number;
+    base: number; // 해당 라인 원래(기존) 인원 — 끝날 때까지 유지
+    added: number; // 이동되어 들어온 인원
     initialHeadcount: number;
     segments: ReallocSegment[];
     segStart: number;
-    segHc: number;
+    segBase: number;
+    segAdded: number;
     finishTime: number | null;
     urgent: boolean;
     autoManaged: boolean;
@@ -92,53 +101,55 @@ export function computeReallocation(
 
   const gs: G[] = groupsInput.map((g) => ({
     name: g.name,
-    loadHours: g.loadHours,
-    remaining: g.loadHours,
-    headcount: g.headcount,
+    loadHours: round30(g.loadHours), // 부하 30분 단위
+    remaining: round30(g.loadHours),
+    base: g.headcount,
+    added: 0,
     initialHeadcount: g.headcount,
     segments: [],
     segStart: startTime,
-    segHc: g.headcount,
+    segBase: g.headcount,
+    segAdded: 0,
     finishTime: g.loadHours <= EPS ? startTime : null,
     urgent: !!g.urgent,
     autoManaged: !!g.autoManaged,
   }));
 
-  // work-time 기준이므로 startTime=0, 마감 = MAX_WORKTIME(11=21:00)
   const maxTime = startTime + MAX_WORKTIME;
-
   const totalLoad = gs.reduce((s, g) => s + g.loadHours, 0);
   const totalPeople = gs.reduce((s, g) => s + g.initialHeadcount, 0);
 
-  // 여유 인력 풀 (출발지 추적)
   const freePool: { origin: string }[] = [];
   let time = startTime;
+  const hc = (g: G) => g.base + g.added;
 
-  const closeSeg = (g: G, newHc: number) => {
-    if (g.segStart < time - EPS && g.segHc > 0) {
-      g.segments.push({ start: g.segStart, end: time, headcount: g.segHc });
+  const closeSeg = (g: G) => {
+    if (g.segStart < time - EPS && g.segBase + g.segAdded > 0) {
+      g.segments.push({
+        start: g.segStart,
+        end: time,
+        base: g.segBase,
+        added: g.segAdded,
+      });
     }
     g.segStart = time;
-    g.segHc = newHc;
+    g.segBase = g.base;
+    g.segAdded = g.added;
   };
 
-  // === 자동관리(autoManaged) 그룹: 인원 고정, 풀 미참여, 독립 처리 ===
+  // === autoManaged: 인원 고정(전부 base), 풀 미참여, 독립 처리 ===
   for (const g of gs) {
     if (!g.autoManaged) continue;
-    if (g.loadHours > EPS && g.headcount > 0) {
-      const wt = g.loadHours / g.headcount; // 1인 기준 작업시간
+    if (g.loadHours > EPS && g.base > 0) {
+      const wt = round30(g.loadHours / g.base);
       const endWt = Math.min(startTime + wt, maxTime);
-      g.segments.push({
-        start: startTime,
-        end: endWt,
-        headcount: g.headcount,
-      });
+      g.segments.push({ start: startTime, end: endWt, base: g.base, added: 0 });
       if (startTime + wt <= maxTime + EPS) {
         g.finishTime = startTime + wt;
         g.remaining = 0;
       } else {
         g.finishTime = null;
-        g.remaining = g.loadHours - g.headcount * (maxTime - startTime);
+        g.remaining = g.loadHours - g.base * (maxTime - startTime);
       }
     } else {
       g.finishTime = startTime;
@@ -146,112 +157,112 @@ export function computeReallocation(
     }
   }
 
-  // 초기 잉여 인력 (예: 자동포장 비자야 외)
+  // 초기 잉여 인력
   for (const ef of extraFree) {
     for (let i = 0; i < ef.count; i++) freePool.push({ origin: ef.origin });
   }
 
-  // 한 라인 최대 2명 → 초과 인원은 여유 풀로
+  // 한 라인 최대 2명 → 초과 base 인원은 여유 풀로
   for (const g of gs) {
     if (g.autoManaged) continue;
-    if (g.headcount > MAX_HEADCOUNT) {
-      const excess = g.headcount - MAX_HEADCOUNT;
+    if (g.base > MAX_HEADCOUNT) {
+      const excess = g.base - MAX_HEADCOUNT;
       for (let i = 0; i < excess; i++) freePool.push({ origin: g.name });
-      g.headcount = MAX_HEADCOUNT;
-      g.segHc = MAX_HEADCOUNT;
+      g.base = MAX_HEADCOUNT;
+      g.segBase = MAX_HEADCOUNT;
     }
   }
 
-  // 시작 시 무부하 일반 그룹 인원은 즉시 여유 풀로
+  // 무부하 일반 그룹 인원 → 즉시 여유 풀
   for (const g of gs) {
     if (g.autoManaged) continue;
-    if (g.remaining <= EPS && g.headcount > 0) {
-      for (let i = 0; i < g.headcount; i++) freePool.push({ origin: g.name });
-      g.segHc = 0;
-      g.headcount = 0;
+    if (g.remaining <= EPS && hc(g) > 0) {
+      for (let i = 0; i < hc(g); i++) freePool.push({ origin: g.name });
+      g.base = 0;
+      g.added = 0;
+      g.segBase = 0;
+      g.segAdded = 0;
     }
   }
 
   const rawMoves: ReallocMove[] = [];
+  const bottleneck = (a: G, b: G) => {
+    const fa = hc(a) > 0 ? a.remaining / hc(a) : Infinity;
+    const fb = hc(b) > 0 ? b.remaining / hc(b) : Infinity;
+    if (Math.abs(fa - fb) > EPS) return fb - fa;
+    if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
+    return 0;
+  };
 
   let guard = 0;
-  while (guard++ < 2000 && time < maxTime - EPS) {
+  while (guard++ < 1000 && time < maxTime - EPS) {
     // 1) 여유 인력 배치 (autoManaged 제외 / 최대 2명 / 1시간 이상 작업 가능)
     while (freePool.length > 0) {
       const remToMax = maxTime - time;
-      const withLoad = gs.filter((g) => {
+      const candidates = gs.filter((g) => {
         if (g.autoManaged) return false;
         if (g.remaining <= EPS) return false;
-        if (g.headcount >= MAX_HEADCOUNT) return false; // 최대 2명
-        // 새 인원 투입 시 완료까지 = remaining/(headcount+1). 21:00 한도 적용.
-        const projected = g.remaining / (g.headcount + 1);
-        const actualWork = Math.min(projected, remToMax);
-        return actualWork >= MIN_WORK_TO_MOVE - EPS; // 1시간 이상 작업 가능할 때만
+        if (hc(g) >= MAX_HEADCOUNT) return false;
+        const projected = g.remaining / (hc(g) + 1);
+        return Math.min(projected, remToMax) >= MIN_WORK_TO_MOVE - EPS;
       });
-      if (withLoad.length === 0) break;
+      if (candidates.length === 0) break;
 
       let target: G;
-      const bottleneck = (a: G, b: G) => {
-        const fa = a.headcount > 0 ? a.remaining / a.headcount : Infinity;
-        const fb = b.headcount > 0 ? b.remaining / b.headcount : Infinity;
-        if (Math.abs(fa - fb) > EPS) return fb - fa;
-        if (!!a.urgent !== !!b.urgent) return a.urgent ? -1 : 1;
-        return 0;
-      };
-
-      // 1순위: 긴급(D-1/D-2) 라인 2명 미달 → 우선 채움
-      const urgentNeed = withLoad
-        .filter((g) => g.urgent && g.headcount < URGENT_MIN_HEADCOUNT)
-        .sort((a, b) => a.headcount - b.headcount || bottleneck(a, b));
-      // 2순위: 부하 있는데 1명(솔로) → 2명 짝 만들기 (1명 단독작업 회피)
-      const soloGroups = withLoad
-        .filter((g) => g.headcount === 1)
+      const urgentNeed = candidates
+        .filter((g) => g.urgent && hc(g) < URGENT_MIN_HEADCOUNT)
+        .sort((a, b) => hc(a) - hc(b) || bottleneck(a, b));
+      const soloGroups = candidates
+        .filter((g) => hc(g) === 1)
         .sort(bottleneck);
 
-      if (urgentNeed.length > 0) {
-        target = urgentNeed[0];
-      } else if (soloGroups.length > 0) {
-        target = soloGroups[0];
-      } else {
-        // 3순위: 병목 (가장 늦게 끝나는 그룹)
-        target = [...withLoad].sort(bottleneck)[0];
-      }
+      if (urgentNeed.length > 0) target = urgentNeed[0];
+      else if (soloGroups.length > 0) target = soloGroups[0];
+      else target = [...candidates].sort(bottleneck)[0];
+
       const worker = freePool.shift()!;
-      closeSeg(target, target.headcount + 1);
-      target.headcount += 1;
+      closeSeg(target);
+      target.added += 1;
+      target.segAdded = target.added;
       rawMoves.push({ time, count: 1, from: worker.origin, to: target.name });
     }
 
-    // 2) 다음 완료 이벤트까지 진행 (단, 21:00 마감 초과 금지)
+    // 2) 30분 진행
     const active = gs.filter(
-      (g) => !g.autoManaged && g.remaining > EPS && g.headcount > 0
+      (g) => !g.autoManaged && g.remaining > EPS && hc(g) > 0
     );
     if (active.length === 0) break;
-    let dt = Infinity;
-    for (const g of active) dt = Math.min(dt, g.remaining / g.headcount);
-    const dtCapped = Math.min(dt, maxTime - time);
-    for (const g of active) g.remaining -= g.headcount * dtCapped;
-    time += dtCapped;
+    const dt = Math.min(STEP, maxTime - time);
+    for (const g of active) g.remaining -= hc(g) * dt;
+    time += dt;
 
-    // 완료 그룹 → 인원 여유 풀로 (autoManaged 제외)
+    // 완료 그룹 → 인원 여유 풀로
     for (const g of gs) {
       if (g.autoManaged) continue;
-      if (g.remaining <= EPS && g.headcount > 0) {
-        closeSeg(g, 0);
+      if (g.remaining <= EPS && hc(g) > 0) {
+        closeSeg(g);
         g.finishTime = time;
-        for (let i = 0; i < g.headcount; i++) freePool.push({ origin: g.name });
-        g.headcount = 0;
+        for (let i = 0; i < hc(g); i++) freePool.push({ origin: g.name });
+        g.base = 0;
+        g.added = 0;
+        g.segBase = 0;
+        g.segAdded = 0;
         g.remaining = 0;
       }
     }
-    if (time >= maxTime - EPS) break; // 21:00 마감
+    if (time >= maxTime - EPS) break;
   }
 
-  // 열린 세그먼트 닫기 (autoManaged 는 이미 독립 처리됨)
+  // 열린 세그먼트 닫기
   for (const g of gs) {
     if (g.autoManaged) continue;
-    if (g.segHc > 0 && g.segStart < time - EPS) {
-      g.segments.push({ start: g.segStart, end: time, headcount: g.segHc });
+    if (g.segBase + g.segAdded > 0 && g.segStart < time - EPS) {
+      g.segments.push({
+        start: g.segStart,
+        end: time,
+        base: g.segBase,
+        added: g.segAdded,
+      });
     }
   }
 
@@ -286,8 +297,8 @@ export function computeReallocation(
       loadHours: g.loadHours,
       initialHeadcount: g.initialHeadcount,
       segments: g.segments,
-      finishTime: g.remaining > EPS ? null : g.finishTime, // 이월이면 완료시각 없음
-      carryHours: Math.max(0, g.remaining),
+      finishTime: g.remaining > EPS ? null : g.finishTime,
+      carryHours: round30(Math.max(0, g.remaining)),
       urgent: g.urgent,
     })),
     totalLoad,
