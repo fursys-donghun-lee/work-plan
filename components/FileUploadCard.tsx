@@ -32,25 +32,69 @@ export function FileUploadCard({
   const ref = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [dragOver, setDragOver] = useState(false);
 
   const handleClick = () => ref.current?.click();
-  const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const f = e.target.files?.[0];
-    if (!f) return;
+
+  const processFile = async (f: File) => {
+    // 확장자 검사 (accept 목록과 비교)
+    const exts = accept
+      .split(",")
+      .map((s) => s.trim().toLowerCase())
+      .filter(Boolean);
+    const lower = f.name.toLowerCase();
+    if (exts.length > 0 && !exts.some((ext) => lower.endsWith(ext))) {
+      setError(`지원하지 않는 파일 형식입니다. (${exts.join(", ")} 만 가능)`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
       await onFileSelected(f);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "파일 처리 중 오류가 발생했습니다.");
+      setError(
+        err instanceof Error ? err.message : "파일 처리 중 오류가 발생했습니다."
+      );
     } finally {
       setBusy(false);
       if (ref.current) ref.current.value = "";
     }
   };
 
+  const handleChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const f = e.target.files?.[0];
+    if (!f) return;
+    await processFile(f);
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "copy";
+    if (!dragOver) setDragOver(true);
+  };
+  const handleDragLeave = (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+  };
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault();
+    setDragOver(false);
+    if (busy) return;
+    const f = e.dataTransfer.files?.[0];
+    if (f) await processFile(f);
+  };
+
   return (
-    <div className={cn("card flex flex-col gap-3", className)}>
+    <div
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={cn(
+        "card flex flex-col gap-3 transition-colors",
+        dragOver && "border-blue-400 ring-2 ring-blue-200 bg-blue-50/40",
+        className
+      )}
+    >
       <div className="flex items-start gap-3">
         <div
           className={cn(
@@ -94,6 +138,26 @@ export function FileUploadCard({
           {error}
         </div>
       )}
+
+      {/* 드롭존 안내 */}
+      <div
+        onClick={handleClick}
+        className={cn(
+          "border-2 border-dashed rounded-lg py-4 px-3 text-center cursor-pointer transition-colors",
+          dragOver
+            ? "border-blue-400 bg-blue-50 text-blue-700"
+            : "border-slate-200 text-slate-400 hover:border-slate-300 hover:bg-slate-50"
+        )}
+      >
+        <Upload className="w-5 h-5 mx-auto mb-1" />
+        <p className="text-xs font-medium">
+          {busy
+            ? "처리 중..."
+            : dragOver
+              ? "여기에 놓으세요"
+              : "파일을 끌어다 놓거나 클릭해서 선택"}
+        </p>
+      </div>
 
       <input
         ref={ref}
