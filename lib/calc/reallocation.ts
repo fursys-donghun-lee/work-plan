@@ -11,7 +11,13 @@ export interface ReallocGroupInput {
   name: string;
   loadHours: number; // 인시
   headcount: number; // 초기 투입 인원 (출근 + 받은지원)
+  urgent?: boolean; // D-1/D-2 긴급건 있는 라인 (우선 배치)
 }
+
+// 작업 마감 = work-time 11 (21:00). 이후 부하는 이월.
+const MAX_WORKTIME = 11;
+// 긴급 라인 최소 투입 인원
+const URGENT_MIN_HEADCOUNT = 2;
 
 export interface ReallocMove {
   time: number; // decimal hours
@@ -31,7 +37,9 @@ export interface ReallocGroupTimeline {
   loadHours: number;
   initialHeadcount: number;
   segments: ReallocSegment[];
-  finishTime: number | null; // 부하 없으면 null
+  finishTime: number | null; // 부하 없으면 null, 이월이면 null
+  carryHours: number; // 21:00까지 못 끝낸 이월 부하(인시)
+  urgent: boolean;
 }
 
 export interface ReallocResult {
@@ -44,6 +52,7 @@ export interface ReallocResult {
   timelines: ReallocGroupTimeline[];
   totalLoad: number;
   totalPeople: number;
+  totalCarry: number; // 다음날 이월 부하 합(인시)
 }
 
 const EPS = 1e-6;
@@ -65,6 +74,7 @@ export function computeReallocation(
     segStart: number;
     segHc: number;
     finishTime: number | null;
+    urgent: boolean;
   }
 
   const gs: G[] = groupsInput.map((g) => ({
@@ -77,7 +87,11 @@ export function computeReallocation(
     segStart: startTime,
     segHc: g.headcount,
     finishTime: g.loadHours <= EPS ? startTime : null,
+    urgent: !!g.urgent,
   }));
+
+  // work-time 기준이므로 startTime=0, 마감 = MAX_WORKTIME(11=21:00)
+  const maxTime = startTime + MAX_WORKTIME;
 
   const totalLoad = gs.reduce((s, g) => s + g.loadHours, 0);
   const totalPeople = gs.reduce((s, g) => s + g.initialHeadcount, 0);
@@ -106,31 +120,44 @@ export function computeReallocation(
   const rawMoves: ReallocMove[] = [];
 
   let guard = 0;
-  while (guard++ < 2000) {
-    // 1) 여유 인력 → 병목 그룹 배치
+  while (guard++ < 2000 && time < maxTime - EPS) {
+    // 1) 여유 인력 배치
     while (freePool.length > 0) {
-      const candidates = gs.filter((g) => g.remaining > EPS);
-      if (candidates.length === 0) break;
-      // 병목: 현재 인원 기준 가장 늦게 끝나는 그룹 (인원 0이면 최우선)
-      candidates.sort((a, b) => {
-        const fa = a.headcount > 0 ? a.remaining / a.headcount : Infinity;
-        const fb = b.headcount > 0 ? b.remaining / b.headcount : Infinity;
-        return fb - fa;
-      });
-      const target = candidates[0];
+      const withLoad = gs.filter((g) => g.remaining > EPS);
+      if (withLoad.length === 0) break;
+
+      let target: G;
+      // 1순위: 긴급(D-1/D-2) 라인 중 최소 인원(2명) 미달 → 우선 채움
+      const urgentNeed = withLoad
+        .filter((g) => g.urgent && g.headcount < URGENT_MIN_HEADCOUNT)
+        .sort((a, b) => a.headcount - b.headcount);
+      if (urgentNeed.length > 0) {
+        target = urgentNeed[0];
+      } else {
+        // 2순위: 병목 (가장 늦게 끝나는 그룹). 동률이면 긴급 라인 우선.
+        const sorted = [...withLoad].sort((a, b) => {
+          const fa = a.headcount > 0 ? a.remaining / a.headcount : Infinity;
+          const fb = b.headcount > 0 ? b.remaining / b.headcount : Infinity;
+          if (Math.abs(fa - fb) > EPS) return fb - fa;
+          if (!!a.urgent !== !!b.urgent) return a.urgent ? -1 : 1;
+          return 0;
+        });
+        target = sorted[0];
+      }
       const worker = freePool.shift()!;
       closeSeg(target, target.headcount + 1);
       target.headcount += 1;
       rawMoves.push({ time, count: 1, from: worker.origin, to: target.name });
     }
 
-    // 2) 다음 완료 이벤트까지 진행
+    // 2) 다음 완료 이벤트까지 진행 (단, 21:00 마감 초과 금지)
     const active = gs.filter((g) => g.remaining > EPS && g.headcount > 0);
     if (active.length === 0) break;
     let dt = Infinity;
     for (const g of active) dt = Math.min(dt, g.remaining / g.headcount);
-    for (const g of active) g.remaining -= g.headcount * dt;
-    time += dt;
+    const dtCapped = Math.min(dt, maxTime - time);
+    for (const g of active) g.remaining -= g.headcount * dtCapped;
+    time += dtCapped;
 
     // 완료 그룹 → 인원 여유 풀로
     for (const g of gs) {
@@ -142,6 +169,7 @@ export function computeReallocation(
         g.remaining = 0;
       }
     }
+    if (time >= maxTime - EPS) break; // 21:00 마감
   }
 
   // 열린 세그먼트 닫기
@@ -168,6 +196,7 @@ export function computeReallocation(
     startTime
   );
   const overtimeHours = Math.max(0, actualEnd - standardEnd);
+  const totalCarry = gs.reduce((s, g) => s + Math.max(0, g.remaining), 0);
 
   return {
     startTime,
@@ -181,10 +210,13 @@ export function computeReallocation(
       loadHours: g.loadHours,
       initialHeadcount: g.initialHeadcount,
       segments: g.segments,
-      finishTime: g.finishTime,
+      finishTime: g.remaining > EPS ? null : g.finishTime, // 이월이면 완료시각 없음
+      carryHours: Math.max(0, g.remaining),
+      urgent: g.urgent,
     })),
     totalLoad,
     totalPeople,
+    totalCarry,
   };
 }
 

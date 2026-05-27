@@ -86,6 +86,11 @@ export function ReallocationPlan({ groups }: Props) {
             <span className="px-2.5 py-1 rounded bg-slate-100 text-slate-700">
               총부하 {result.totalLoad.toFixed(1)}인시 / {result.totalPeople}명
             </span>
+            {result.totalCarry > 0.01 && (
+              <span className="px-2.5 py-1 rounded bg-amber-50 text-amber-700">
+                다음날 이월 {result.totalCarry.toFixed(1)}인시
+              </span>
+            )}
           </div>
 
           {/* 간트 차트 */}
@@ -98,7 +103,12 @@ export function ReallocationPlan({ groups }: Props) {
                 .filter((t) => t.loadHours > 0.01)
                 .map((t) => (
                   <div key={t.name} className="flex items-center gap-2">
-                    <div className="w-28 text-xs font-medium text-slate-700 truncate">
+                    <div className="w-28 text-xs font-medium text-slate-700 truncate flex items-center gap-1">
+                      {t.urgent && (
+                        <span className="text-rose-600" title="긴급건 라인">
+                          ●
+                        </span>
+                      )}
                       {t.name}
                     </div>
                     <div className="flex-1 relative h-6 bg-slate-100 rounded">
@@ -132,10 +142,19 @@ export function ReallocationPlan({ groups }: Props) {
                         })
                       )}
                     </div>
-                    <div className="w-12 text-[11px] text-slate-500 text-right">
-                      {t.finishTime !== null
-                        ? formatHM(workTimeToWall(t.finishTime))
-                        : "-"}
+                    <div className="w-14 text-[11px] text-right">
+                      {t.finishTime !== null ? (
+                        <span className="text-slate-500">
+                          {formatHM(workTimeToWall(t.finishTime))}
+                        </span>
+                      ) : (
+                        <span
+                          className="text-amber-700 font-medium"
+                          title={`${t.carryHours.toFixed(1)}인시 이월`}
+                        >
+                          이월
+                        </span>
+                      )}
                     </div>
                   </div>
                 ))}

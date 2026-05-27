@@ -552,11 +552,15 @@ export function DaerimFloorView() {
 
       {/* 시간대별 재배치 계획 */}
       <ReallocationPlan
-        groups={directGroups.map((g) => ({
-          name: g.group,
-          loadHours: g.loadHours,
-          headcount: g.presentMembers.length + g.supportCount,
-        }))}
+        groups={directGroups.map((g) => {
+          const u = getUrgentFor(urgentMap, g.group);
+          return {
+            name: g.group,
+            loadHours: g.loadHours,
+            headcount: g.presentMembers.length + g.supportCount,
+            urgent: u.dMinus1 > 0 || u.dMinus2 > 0,
+          };
+        })}
       />
 
       {/* 미배치 인원 (간단 안내) */}
