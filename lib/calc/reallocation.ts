@@ -22,7 +22,7 @@ export interface ReallocExtraFree {
 }
 
 // 작업 마감 = work-time 11 (21:00). 이후 부하는 이월.
-const MAX_WORKTIME = 11;
+export const MAX_WORKTIME = 11;
 // 긴급 라인 최소 투입 인원
 const URGENT_MIN_HEADCOUNT = 2;
 // 한 라인 최대 인원
@@ -95,8 +95,10 @@ function computeMetrics(
   let regularWork = 0;
   let otWork = 0;
   let overtimePeople = 0;
+  let overtimeIdle = 0; // 잔업 투입됐지만 21:00 전에 끝나 남는 시간(인시)
   for (const g of segmentsByGroup) {
     let maxOtHc = 0;
+    let otEnd = otStart; // 이 그룹 잔업 세그먼트의 가장 늦은 종료(work-time)
     for (const seg of g.segments) {
       const h = seg.base + seg.added;
       const regHi = Math.min(seg.end, otStart);
@@ -107,12 +109,17 @@ function computeMetrics(
       if (otHi > otLo) {
         otWork += (otHi - otLo) * h;
         maxOtHc = Math.max(maxOtHc, h);
+        otEnd = Math.max(otEnd, otHi);
       }
     }
     overtimePeople += maxOtHc;
+    // 잔업한 인원이 21:00(maxTime)까지 못 채우고 남긴 유휴
+    if (maxOtHc > 0 && otEnd < maxTime) {
+      overtimeIdle += (maxTime - otEnd) * maxOtHc;
+    }
   }
   const availableLoad = totalPeople * standardHours;
-  const idleHours = Math.max(0, availableLoad - regularWork);
+  const idleHours = Math.max(0, availableLoad - regularWork) + overtimeIdle;
   return {
     availableLoad: Math.round(availableLoad * 2) / 2,
     idleHours: Math.round(idleHours * 2) / 2,

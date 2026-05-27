@@ -8,6 +8,7 @@ import {
   splitWorkSegment,
   workTimeToWall,
   STANDARD_WORKTIME,
+  MAX_WORKTIME,
   type ReallocGroupInput,
   type ReallocExtraFree,
 } from "@/lib/calc/reallocation";
@@ -213,24 +214,29 @@ export function ReallocationPlan({
                     <div className="flex-1 relative h-6 bg-slate-50 rounded overflow-hidden">
                       {/* 휴게 음영 + 블록 경계선 (배경) */}
                       {trackBackground}
-                      {/* 유휴(버려진) 시간 — 기본 배치에서 정규시간 전에 끝난 라인 */}
-                      {disableRealloc &&
-                        t.finishTime !== null &&
-                        t.finishTime < STANDARD_WORKTIME - 1e-6 &&
-                        splitWorkSegment(t.finishTime, STANDARD_WORKTIME).map(
-                          (w, wi) => (
-                            <div
-                              key={`idle-${wi}`}
-                              className="absolute top-0 bottom-0 bg-rose-300/50"
-                              style={{
-                                left: `${pct(w.start)}%`,
-                                width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
-                              }}
-                              title={`유휴 ${formatHM(w.start)}~${formatHM(w.end)} (작업 종료 후 미사용)`}
-                            />
-                          )
-                        )}
-                      {/* 작업 막대 — 이동 인원 포함 시 주황, 아니면 파랑 */}
+                      {/* 유휴(버려진) 시간 — 정규시간 전 종료 시 17:30까지,
+                          잔업 중 종료 시 21:00까지 미사용 구간을 연한 빨강으로 */}
+                      {(() => {
+                        const f = t.finishTime;
+                        if (f === null) return null;
+                        let idleEnd: number | null = null;
+                        if (f < STANDARD_WORKTIME - 1e-6) idleEnd = STANDARD_WORKTIME;
+                        else if (f > STANDARD_WORKTIME + 1e-6 && f < MAX_WORKTIME - 1e-6)
+                          idleEnd = MAX_WORKTIME;
+                        if (idleEnd === null) return null;
+                        return splitWorkSegment(f, idleEnd).map((w, wi) => (
+                          <div
+                            key={`idle-${wi}`}
+                            className="absolute top-0 bottom-0 bg-rose-300/50"
+                            style={{
+                              left: `${pct(w.start)}%`,
+                              width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
+                            }}
+                            title={`유휴 ${formatHM(w.start)}~${formatHM(w.end)} (작업 종료 후 미사용)`}
+                          />
+                        ));
+                      })()}
+                      {/* 작업 막대 — 이동 인원 포함 시 초록, 아니면 파랑 */}
                       {t.segments.flatMap((seg, si) =>
                         splitWorkSegment(seg.start, seg.end).map((w, wi) => {
                           const total = seg.base + seg.added;
@@ -240,7 +246,7 @@ export function ReallocationPlan({
                               key={`${si}-${wi}`}
                               className={cn(
                                 "absolute top-0 bottom-0 rounded flex items-center justify-center text-[10px] font-semibold text-white",
-                                seg.added > 0 ? "bg-orange-400" : "bg-blue-500"
+                                seg.added > 0 ? "bg-emerald-500" : "bg-blue-500"
                               )}
                               style={{
                                 left: `${pct(w.start)}%`,
@@ -277,19 +283,17 @@ export function ReallocationPlan({
                 기존 인원만
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-orange-400 inline-block" />
+                <span className="w-3 h-3 rounded bg-emerald-500 inline-block" />
                 이동 인원 포함
               </span>
               <span className="inline-flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-slate-200 inline-block" />
                 휴게
               </span>
-              {disableRealloc && (
-                <span className="inline-flex items-center gap-1">
-                  <span className="w-3 h-3 rounded bg-rose-300/50 inline-block" />
-                  유휴(버려진) 시간
-                </span>
-              )}
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-rose-300/50 inline-block" />
+                유휴(버려진) 시간
+              </span>
               <span>· 막대 안 숫자 = 투입 인원 · 마우스 올리면 기존/이동 상세 · 우측 = 완료시각</span>
             </div>
           </div>
