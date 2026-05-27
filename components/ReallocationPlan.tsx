@@ -8,7 +8,7 @@ import {
   splitWorkSegment,
   workTimeToWall,
   STANDARD_WORKTIME,
-  MAX_WORKTIME,
+  isOperating,
   type ReallocGroupInput,
   type ReallocExtraFree,
 } from "@/lib/calc/reallocation";
@@ -214,53 +214,73 @@ export function ReallocationPlan({
                     <div className="flex-1 relative h-6 bg-slate-50 rounded overflow-hidden">
                       {/* 휴게 음영 + 블록 경계선 (배경) */}
                       {trackBackground}
-                      {/* 유휴(버려진) 시간 — 정규시간 전 종료 시 17:30까지,
-                          잔업 중 종료 시 21:00까지 미사용 구간을 연한 빨강으로 */}
+                      {/* 유휴(비가동) 구간 — 정규시간 내 '가동' 막대가 없는 시간을 연한 빨강으로
+                          (작업 전 대기 · 종료 후 · 1명 비가동 모두 포함) */}
                       {(() => {
-                        const f = t.finishTime;
-                        if (f === null) return null;
-                        let idleEnd: number | null = null;
-                        if (f < STANDARD_WORKTIME - 1e-6) idleEnd = STANDARD_WORKTIME;
-                        else if (f > STANDARD_WORKTIME + 1e-6 && f < MAX_WORKTIME - 1e-6)
-                          idleEnd = MAX_WORKTIME;
-                        if (idleEnd === null) return null;
-                        return splitWorkSegment(f, idleEnd).map((w, wi) => (
-                          <div
-                            key={`idle-${wi}`}
-                            className="absolute top-0 bottom-0 bg-rose-400/55"
-                            style={{
-                              left: `${pct(w.start)}%`,
-                              width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
-                            }}
-                            title={`유휴 ${formatHM(w.start)}~${formatHM(w.end)} (작업 종료 후 미사용)`}
-                          />
-                        ));
-                      })()}
-                      {/* 작업 막대 — 이동 인원 포함 시 연한 노랑, 아니면 파랑 */}
-                      {t.segments.flatMap((seg, si) =>
-                        splitWorkSegment(seg.start, seg.end).map((w, wi) => {
-                          const total = seg.base + seg.added;
-                          if (total === 0) return null;
-                          return (
+                        const REG = STANDARD_WORKTIME; // 정규 8h
+                        // 정규시간 내 '가동' 구간만 모아 그 보색(=유휴 갭) 계산
+                        const ops = t.segments
+                          .filter((s) =>
+                            isOperating(s.base + s.added, t.autoManaged)
+                          )
+                          .map((s) => ({
+                            start: Math.max(0, s.start),
+                            end: Math.min(REG, s.end),
+                          }))
+                          .filter((s) => s.end > s.start + 1e-9)
+                          .sort((a, b) => a.start - b.start);
+                        const gaps: { start: number; end: number }[] = [];
+                        let cur = 0;
+                        for (const o of ops) {
+                          if (o.start > cur + 1e-9)
+                            gaps.push({ start: cur, end: o.start });
+                          cur = Math.max(cur, o.end);
+                        }
+                        if (cur < REG - 1e-9) gaps.push({ start: cur, end: REG });
+                        return gaps.flatMap((gp, gi) =>
+                          splitWorkSegment(gp.start, gp.end).map((w, wi) => (
                             <div
-                              key={`${si}-${wi}`}
-                              className={cn(
-                                "absolute top-0 bottom-0 rounded flex items-center justify-center text-[10px] font-semibold",
-                                seg.added > 0
-                                  ? "bg-yellow-200 text-slate-800"
-                                  : "bg-blue-500 text-white"
-                              )}
+                              key={`idle-${gi}-${wi}`}
+                              className="absolute top-0 bottom-0 bg-rose-400/55"
                               style={{
                                 left: `${pct(w.start)}%`,
-                                width: `${Math.max(pct(w.end) - pct(w.start), 1.5)}%`,
+                                width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
                               }}
-                              title={`${formatHM(w.start)}~${formatHM(w.end)} · 기존 ${seg.base} / 이동 ${seg.added}`}
-                            >
-                              {total}
-                            </div>
-                          );
-                        })
-                      )}
+                              title={`유휴 ${formatHM(w.start)}~${formatHM(w.end)} (비가동)`}
+                            />
+                          ))
+                        );
+                      })()}
+                      {/* 작업 막대 — 가동(이동 포함=노랑/기존=파랑), 1명 비가동=빨강 */}
+                      {t.segments.flatMap((seg, si) => {
+                        const total = seg.base + seg.added;
+                        if (total === 0) return null;
+                        const operating = isOperating(total, t.autoManaged);
+                        return splitWorkSegment(seg.start, seg.end).map((w, wi) => (
+                          <div
+                            key={`${si}-${wi}`}
+                            className={cn(
+                              "absolute top-0 bottom-0 rounded flex items-center justify-center text-[10px] font-semibold",
+                              !operating
+                                ? "bg-rose-400/55 text-rose-950"
+                                : seg.added > 0
+                                  ? "bg-yellow-100 text-slate-800 border border-yellow-300"
+                                  : "bg-blue-500 text-white"
+                            )}
+                            style={{
+                              left: `${pct(w.start)}%`,
+                              width: `${Math.max(pct(w.end) - pct(w.start), 1.5)}%`,
+                            }}
+                            title={
+                              operating
+                                ? `${formatHM(w.start)}~${formatHM(w.end)} · 기존 ${seg.base} / 이동 ${seg.added}`
+                                : `${formatHM(w.start)}~${formatHM(w.end)} · ${total}명 (비가동·유휴)`
+                            }
+                          >
+                            {total}
+                          </div>
+                        ));
+                      })}
                     </div>
                     <div className="w-14 flex-shrink-0 text-[11px] text-right">
                       {t.finishTime !== null ? (
@@ -282,21 +302,21 @@ export function ReallocationPlan({
             <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-400 flex-wrap">
               <span className="inline-flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-blue-500 inline-block" />
-                기존 인원만
+                가동(기존 인원)
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-yellow-200 border border-yellow-300 inline-block" />
-                이동 인원 포함
+                <span className="w-3 h-3 rounded bg-yellow-100 border border-yellow-300 inline-block" />
+                가동(이동 인원 포함)
+              </span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-rose-400/55 inline-block" />
+                유휴(비가동·1명·작업없음)
               </span>
               <span className="inline-flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-slate-200 inline-block" />
                 휴게
               </span>
-              <span className="inline-flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-rose-400/55 inline-block" />
-                유휴(버려진) 시간
-              </span>
-              <span>· 막대 안 숫자 = 투입 인원 · 마우스 올리면 기존/이동 상세 · 우측 = 완료시각</span>
+              <span>· 막대 안 숫자 = 투입 인원 · 마우스 올리면 상세 · 우측 = 완료시각</span>
             </div>
           </div>
 

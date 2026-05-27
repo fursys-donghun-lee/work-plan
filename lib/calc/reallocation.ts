@@ -52,6 +52,7 @@ export interface ReallocGroupTimeline {
   finishTime: number | null; // 부하 없으면 null, 이월이면 null
   carryHours: number; // 21:00까지 못 끝낸 이월 부하(인시)
   urgent: boolean;
+  autoManaged: boolean; // 자동포장 등 — 1명도 가동으로 인정
 }
 
 // 30분 단위 반올림
@@ -78,9 +79,18 @@ export interface ReallocResult {
 
 const EPS = 1e-6;
 
-// 세그먼트 기반 메트릭 (정규작업/잔업/유휴)
+// 라인이 '가동 중'인지 — 일반라인 2명 이상 / 자동포장라인 1명 이상
+export function isOperating(headcount: number, autoManaged: boolean): boolean {
+  return autoManaged ? headcount >= 1 : headcount >= 2;
+}
+
+// 세그먼트 기반 메트릭 (실가동/잔업/유휴)
+//
+// 유휴 = 가용부하(인원×정규8h) − 실가동 인시
+//   · 실가동 = '가동 중'인 라인-구간만 (1명 일반라인 등 비가동은 제외)
+//   · 인원 기준이라, 끝난 인원이 다른 라인에 가서 가동시키면 유휴로 안 잡힘
 function computeMetrics(
-  segmentsByGroup: { segments: ReallocSegment[] }[],
+  groups: { segments: ReallocSegment[]; autoManaged: boolean }[],
   startTime: number,
   standardHours: number,
   maxTime: number,
@@ -92,34 +102,31 @@ function computeMetrics(
   overtimePersonHours: number;
 } {
   const otStart = startTime + standardHours;
-  let regularWork = 0;
+  let productiveWork = 0; // 정규시간 내 '가동'으로 인정되는 인시
   let otWork = 0;
   let overtimePeople = 0;
-  let overtimeIdle = 0; // 잔업 투입됐지만 21:00 전에 끝나 남는 시간(인시)
-  for (const g of segmentsByGroup) {
+  for (const g of groups) {
     let maxOtHc = 0;
-    let otEnd = otStart; // 이 그룹 잔업 세그먼트의 가장 늦은 종료(work-time)
     for (const seg of g.segments) {
       const h = seg.base + seg.added;
-      const regHi = Math.min(seg.end, otStart);
-      const regLo = Math.max(seg.start, startTime);
-      if (regHi > regLo) regularWork += (regHi - regLo) * h;
+      // 정규시간 내 가동 인시 (비가동 구간은 제외 → 유휴로 흡수)
+      if (isOperating(h, g.autoManaged)) {
+        const hi = Math.min(seg.end, otStart);
+        const lo = Math.max(seg.start, startTime);
+        if (hi > lo) productiveWork += (hi - lo) * h;
+      }
+      // 잔업 인시/인원 (실제 잔업 투입 기준)
       const otHi = Math.min(seg.end, maxTime);
       const otLo = Math.max(seg.start, otStart);
       if (otHi > otLo) {
         otWork += (otHi - otLo) * h;
         maxOtHc = Math.max(maxOtHc, h);
-        otEnd = Math.max(otEnd, otHi);
       }
     }
     overtimePeople += maxOtHc;
-    // 잔업한 인원이 21:00(maxTime)까지 못 채우고 남긴 유휴
-    if (maxOtHc > 0 && otEnd < maxTime) {
-      overtimeIdle += (maxTime - otEnd) * maxOtHc;
-    }
   }
   const availableLoad = totalPeople * standardHours;
-  const idleHours = Math.max(0, availableLoad - regularWork) + overtimeIdle;
+  const idleHours = Math.max(0, availableLoad - productiveWork);
   return {
     availableLoad: Math.round(availableLoad * 2) / 2,
     idleHours: Math.round(idleHours * 2) / 2,
@@ -258,6 +265,7 @@ export function computeReallocation(
         finishTime: g.remaining > EPS ? null : g.finishTime,
         carryHours: round30(Math.max(0, g.remaining)),
         urgent: g.urgent,
+        autoManaged: g.autoManaged,
       })),
       totalLoad,
       totalPeople,
@@ -410,6 +418,7 @@ export function computeReallocation(
       finishTime: g.remaining > EPS ? null : g.finishTime,
       carryHours: round30(Math.max(0, g.remaining)),
       urgent: g.urgent,
+      autoManaged: g.autoManaged,
     })),
     totalLoad,
     totalPeople,
