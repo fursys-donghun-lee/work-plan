@@ -78,7 +78,8 @@ export function computeReallocation(
   groupsInput: ReallocGroupInput[],
   startTime = 8.5,
   standardHours = 8,
-  extraFree: ReallocExtraFree[] = []
+  extraFree: ReallocExtraFree[] = [],
+  disableRealloc = false // true 면 기본 배치(이동 없음)로 계산
 ): ReallocResult {
   const standardEnd = startTime + standardHours;
   const STEP = 0.5; // 30분 단위 시뮬레이션
@@ -155,6 +156,56 @@ export function computeReallocation(
       g.finishTime = startTime;
       g.remaining = 0;
     }
+  }
+
+  // === 기본 배치 모드: 각 그룹이 초기 인원으로 자기 부하만 처리 (이동 없음) ===
+  if (disableRealloc) {
+    for (const g of gs) {
+      if (g.autoManaged) continue;
+      const head = g.base;
+      if (g.loadHours > EPS && head > 0) {
+        const wt = round30(g.loadHours / head);
+        const endWt = Math.min(startTime + wt, maxTime);
+        g.segments.push({ start: startTime, end: endWt, base: head, added: 0 });
+        if (startTime + wt <= maxTime + EPS) {
+          g.finishTime = startTime + wt;
+          g.remaining = 0;
+        } else {
+          g.finishTime = null;
+          g.remaining = g.loadHours - head * (maxTime - startTime);
+        }
+      } else {
+        g.finishTime = startTime;
+        g.remaining = 0;
+      }
+    }
+
+    const actualEnd0 = gs.reduce(
+      (mx, g) => Math.max(mx, g.finishTime ?? startTime),
+      startTime
+    );
+    const overtimeHours0 = Math.max(0, actualEnd0 - standardEnd);
+    const totalCarry0 = gs.reduce((s, g) => s + Math.max(0, g.remaining), 0);
+    return {
+      startTime,
+      standardEnd,
+      actualEnd: actualEnd0,
+      hasOvertime: overtimeHours0 > EPS,
+      overtimeHours: overtimeHours0,
+      moves: [],
+      timelines: gs.map((g) => ({
+        name: g.name,
+        loadHours: g.loadHours,
+        initialHeadcount: g.initialHeadcount,
+        segments: g.segments,
+        finishTime: g.remaining > EPS ? null : g.finishTime,
+        carryHours: round30(Math.max(0, g.remaining)),
+        urgent: g.urgent,
+      })),
+      totalLoad,
+      totalPeople,
+      totalCarry: totalCarry0,
+    };
   }
 
   // 초기 잉여 인력

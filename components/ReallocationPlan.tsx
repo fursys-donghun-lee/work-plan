@@ -16,15 +16,24 @@ import { ArrowRight, ChevronDown, ChevronUp, Clock } from "lucide-react";
 interface Props {
   groups: ReallocGroupInput[]; // 직접그룹 (피더 제외)
   extraFree?: ReallocExtraFree[];
+  disableRealloc?: boolean; // true 면 기본 배치(이동 없음)
+  title?: string; // 헤더 제목 (기본: 시간대별 재배치 계획)
+  defaultOpen?: boolean;
 }
 
-export function ReallocationPlan({ groups, extraFree = [] }: Props) {
-  const [open, setOpen] = useState(false);
+export function ReallocationPlan({
+  groups,
+  extraFree = [],
+  disableRealloc = false,
+  title,
+  defaultOpen = false,
+}: Props) {
+  const [open, setOpen] = useState(defaultOpen);
 
   // 시뮬레이션은 work-time(0부터, 휴게 제외 누적 작업시간) 기준
   const result = useMemo(
-    () => computeReallocation(groups, 0, 8, extraFree),
-    [groups, extraFree]
+    () => computeReallocation(groups, 0, 8, extraFree, disableRealloc),
+    [groups, extraFree, disableRealloc]
   );
 
   const loadedGroups = groups.filter((g) => g.loadHours > 0.01);
@@ -84,9 +93,11 @@ export function ReallocationPlan({ groups, extraFree = [] }: Props) {
       >
         <h2 className="font-semibold text-slate-900 flex items-center gap-2">
           <Clock className="w-4 h-4 text-blue-600" />
-          시간대별 재배치 계획
+          {title ?? "시간대별 재배치 계획"}
           <span className="text-xs font-normal text-slate-500">
-            (08:30 시작 · 점심/저녁 휴게 반영 · 잔업 최소화)
+            {disableRealloc
+              ? "(08:30 시작 · 점심/저녁 휴게 반영 · 이동 없음)"
+              : "(08:30 시작 · 점심/저녁 휴게 반영 · 잔업 최소화)"}
           </span>
         </h2>
         {open ? (
@@ -229,7 +240,8 @@ export function ReallocationPlan({ groups, extraFree = [] }: Props) {
             </div>
           </div>
 
-          {/* 이동 지시 목록 */}
+          {/* 이동 지시 목록 (기본 배치 모드에선 숨김) */}
+          {!disableRealloc && (
           <div>
             <h3 className="text-sm font-semibold text-slate-700 mb-2">
               인력 이동 지시
@@ -259,6 +271,7 @@ export function ReallocationPlan({ groups, extraFree = [] }: Props) {
               </div>
             )}
           </div>
+          )}
         </div>
       )}
     </div>
