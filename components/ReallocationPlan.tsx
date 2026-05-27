@@ -107,16 +107,11 @@ export function ReallocationPlan({
       {open && (
         <div className="mt-4 space-y-5">
           {/* 요약 지표 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
             {[
               {
                 label: "직접 출근인원",
                 value: `${result.totalPeople}명`,
-                tone: "slate" as const,
-              },
-              {
-                label: "총부하",
-                value: `${result.totalLoad.toFixed(1)}인시`,
                 tone: "slate" as const,
               },
               {

@@ -23,6 +23,8 @@ export interface ReallocExtraFree {
 
 // 작업 마감 = work-time 11 (21:00). 이후 부하는 이월.
 export const MAX_WORKTIME = 11;
+// 잔업으로 해야 할 작업시간이 이 값(시간) 이하이면 잔업하지 않고 이월
+const OT_SKIP_THRESHOLD = 2;
 // 긴급 라인 최소 투입 인원
 const URGENT_MIN_HEADCOUNT = 2;
 // 한 라인 최대 인원
@@ -194,46 +196,55 @@ export function computeReallocation(
     g.segAdded = g.added;
   };
 
-  // === autoManaged: 인원 고정(전부 base), 풀 미참여, 독립 처리 ===
-  for (const g of gs) {
-    if (!g.autoManaged) continue;
-    if (g.loadHours > EPS && g.base > 0) {
-      const wt = round30(g.loadHours / g.base);
+  // 단일 라인 정적 배치 (이동 없음) — 완료시각·세그먼트·이월 산출
+  //  · 잔업 작업시간이 OT_SKIP_THRESHOLD 이하이면 잔업 생략 → 정규까지만 하고 이월
+  const placeStatic = (g: G, head: number) => {
+    if (g.loadHours <= EPS || head <= 0) {
+      g.finishTime = startTime;
+      g.remaining = 0;
+      return;
+    }
+    const wt = round30(g.loadHours / head); // 완료까지 work-time
+    if (wt <= standardHours + EPS) {
+      // 정규시간 내 완료
+      g.segments.push({ start: startTime, end: startTime + wt, base: head, added: 0 });
+      g.finishTime = startTime + wt;
+      g.remaining = 0;
+    } else if (wt - standardHours <= OT_SKIP_THRESHOLD + EPS) {
+      // 잔업 2시간 이하 → 잔업 안 함, 정규시간까지만 작업하고 이월
+      g.segments.push({
+        start: startTime,
+        end: startTime + standardHours,
+        base: head,
+        added: 0,
+      });
+      g.finishTime = null;
+      g.remaining = g.loadHours - head * standardHours;
+    } else {
+      // 잔업 진행, 21:00(maxTime)까지
       const endWt = Math.min(startTime + wt, maxTime);
-      g.segments.push({ start: startTime, end: endWt, base: g.base, added: 0 });
+      g.segments.push({ start: startTime, end: endWt, base: head, added: 0 });
       if (startTime + wt <= maxTime + EPS) {
         g.finishTime = startTime + wt;
         g.remaining = 0;
       } else {
         g.finishTime = null;
-        g.remaining = g.loadHours - g.base * (maxTime - startTime);
+        g.remaining = g.loadHours - head * (maxTime - startTime);
       }
-    } else {
-      g.finishTime = startTime;
-      g.remaining = 0;
     }
+  };
+
+  // === autoManaged: 인원 고정(전부 base), 풀 미참여, 독립 처리 ===
+  for (const g of gs) {
+    if (!g.autoManaged) continue;
+    placeStatic(g, g.base);
   }
 
   // === 기본 배치 모드: 각 그룹이 초기 인원으로 자기 부하만 처리 (이동 없음) ===
   if (disableRealloc) {
     for (const g of gs) {
       if (g.autoManaged) continue;
-      const head = g.base;
-      if (g.loadHours > EPS && head > 0) {
-        const wt = round30(g.loadHours / head);
-        const endWt = Math.min(startTime + wt, maxTime);
-        g.segments.push({ start: startTime, end: endWt, base: head, added: 0 });
-        if (startTime + wt <= maxTime + EPS) {
-          g.finishTime = startTime + wt;
-          g.remaining = 0;
-        } else {
-          g.finishTime = null;
-          g.remaining = g.loadHours - head * (maxTime - startTime);
-        }
-      } else {
-        g.finishTime = startTime;
-        g.remaining = 0;
-      }
+      placeStatic(g, g.base);
     }
 
     const actualEnd0 = gs.reduce(
@@ -305,6 +316,28 @@ export function computeReallocation(
 
   let guard = 0;
   while (guard++ < 1000 && time < maxTime - EPS) {
+    // 0) 잔업 진입 판단 — 표준시간 도달 시, 여유인력을 최적 배치한다고 가정해도
+    //    남은 잔업 작업시간이 2h 이하이면 잔업 생략(남은 부하 이월)
+    if (Math.abs(time - standardEnd) < EPS) {
+      const act = gs
+        .filter((g) => !g.autoManaged && g.remaining > EPS && hc(g) > 0)
+        .map((g) => ({ remaining: g.remaining, head: hc(g) }));
+      let pool = freePool.length;
+      while (pool > 0) {
+        const cand = act
+          .filter((a) => a.head < MAX_HEADCOUNT)
+          .sort((a, b) => b.remaining / b.head - a.remaining / a.head)[0];
+        if (!cand) break;
+        cand.head += 1;
+        pool -= 1;
+      }
+      const otNeed = act.reduce(
+        (mx, a) => Math.max(mx, a.remaining / a.head),
+        0
+      );
+      if (otNeed <= OT_SKIP_THRESHOLD + EPS) break;
+    }
+
     // 1) 여유 인력 배치 (autoManaged 제외 / 최대 2명 / 1시간 이상 작업 가능)
     while (freePool.length > 0) {
       const remToMax = maxTime - time;
