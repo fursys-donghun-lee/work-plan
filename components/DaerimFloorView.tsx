@@ -557,7 +557,6 @@ export function DaerimFloorView() {
           loadHours: g.loadHours,
           headcount: g.presentMembers.length + g.supportCount,
         }))}
-        startTime={8.5}
       />
 
       {/* 미배치 인원 (간단 안내) */}

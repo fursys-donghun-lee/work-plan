@@ -197,3 +197,54 @@ export function formatHM(decimalHours: number): string {
   }
   return `${String(h).padStart(2, "0")}:${String(m).padStart(2, "0")}`;
 }
+
+// === 실제 작업 시간표 (휴게 반영) ===
+// 작업: 08:30~12:30(4h) + 13:30~17:30(4h) = 표준 8h
+// 점심 12:30~13:30, 저녁 17:30~18:00 (작업 없음)
+// 잔업: 18:00~21:00 (3h)
+// work-time(누적 작업시간, 0부터) ↔ 벽시계 변환
+export const WORK_PERIODS = [
+  { wtStart: 0, wtEnd: 4, wallStart: 8.5 }, // 08:30~12:30
+  { wtStart: 4, wtEnd: 8, wallStart: 13.5 }, // 13:30~17:30
+  { wtStart: 8, wtEnd: 11, wallStart: 18.0 }, // 18:00~21:00 (잔업)
+];
+
+// 표준 종료 = work-time 8 = 17:30
+export const STANDARD_WORKTIME = 8;
+export const STANDARD_END_WALL = 17.5;
+
+export function workTimeToWall(wt: number): number {
+  for (const p of WORK_PERIODS) {
+    if (wt <= p.wtEnd + EPS) {
+      return p.wallStart + (wt - p.wtStart);
+    }
+  }
+  const last = WORK_PERIODS[WORK_PERIODS.length - 1];
+  // 21:00 초과분은 그대로 연장 표시
+  return last.wallStart + (last.wtEnd - last.wtStart) + (wt - last.wtEnd);
+}
+
+// work-time 구간 [a,b] 를 휴게로 분할한 벽시계 구간 목록으로
+export function splitWorkSegment(
+  a: number,
+  b: number
+): { start: number; end: number }[] {
+  const segs: { start: number; end: number }[] = [];
+  for (const p of WORK_PERIODS) {
+    const lo = Math.max(a, p.wtStart);
+    const hi = Math.min(b, p.wtEnd);
+    if (hi > lo + EPS) {
+      segs.push({
+        start: p.wallStart + (lo - p.wtStart),
+        end: p.wallStart + (hi - p.wtStart),
+      });
+    }
+  }
+  const last = WORK_PERIODS[WORK_PERIODS.length - 1];
+  if (b > last.wtEnd + EPS) {
+    const lo = Math.max(a, last.wtEnd);
+    const base = last.wallStart + (last.wtEnd - last.wtStart);
+    segs.push({ start: base + (lo - last.wtEnd), end: base + (b - last.wtEnd) });
+  }
+  return segs;
+}
