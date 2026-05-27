@@ -257,19 +257,42 @@ export function ReallocationPlan({
                           cur = Math.max(cur, s.end);
                         }
                         if (cur < limit - 1e-9) gaps.push({ start: cur, end: limit });
-                        return gaps.flatMap((gp, gi) =>
-                          splitWorkSegment(gp.start, gp.end).map((w, wi) => (
-                            <div
-                              key={`idle-${gi}-${wi}`}
-                              className="absolute top-0 bottom-0 bg-rose-400/55"
-                              style={{
-                                left: `${pct(w.start)}%`,
-                                width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
-                              }}
-                              title={`유휴 ${formatHM(w.start)}~${formatHM(w.end)} (작업 없음)`}
-                            />
-                          ))
-                        );
+                        return gaps.flatMap((gp, gi) => {
+                          // 이 갭이 '인원 이동(재배치)'으로 비었는지 — 갭 시작 시점에 이 라인에서 나간 이동이 있으면 이동
+                          const movedOut = result.moves.some(
+                            (m) =>
+                              m.from === t.name &&
+                              m.time >= gp.start - 1e-6 &&
+                              m.time < gp.end - 1e-6
+                          );
+                          return splitWorkSegment(gp.start, gp.end).map((w, wi) =>
+                            movedOut ? (
+                              // 재배치로 비운 구간: 빨강 대신 비우고 이동 표시
+                              <div
+                                key={`mv-${gi}-${wi}`}
+                                className="absolute top-0 bottom-0 flex items-center justify-center"
+                                style={{
+                                  left: `${pct(w.start)}%`,
+                                  width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
+                                }}
+                                title={`${formatHM(w.start)}~${formatHM(w.end)} · 인원 재배치(다른 라인으로 이동)`}
+                              >
+                                <ArrowRight className="w-3 h-3 text-slate-300" />
+                              </div>
+                            ) : (
+                              // 진짜 유휴(노는 시간): 연한 빨강
+                              <div
+                                key={`idle-${gi}-${wi}`}
+                                className="absolute top-0 bottom-0 bg-rose-400/55"
+                                style={{
+                                  left: `${pct(w.start)}%`,
+                                  width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
+                                }}
+                                title={`유휴 ${formatHM(w.start)}~${formatHM(w.end)} (작업 없음)`}
+                              />
+                            )
+                          );
+                        });
                       })()}
                       {/* 작업 막대 — 이동 인원 포함 시 연한 노랑, 아니면 파랑 (1명도 작업으로 표시) */}
                       {t.segments.flatMap((seg, si) => {
@@ -325,6 +348,12 @@ export function ReallocationPlan({
                 <span className="w-3 h-3 rounded bg-rose-400/55 inline-block" />
                 유휴(작업 없음)
               </span>
+              {!disableRealloc && (
+                <span className="inline-flex items-center gap-1">
+                  <ArrowRight className="w-3 h-3 text-slate-300" />
+                  인원 이동(재배치)
+                </span>
+              )}
               <span className="inline-flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-slate-200 inline-block" />
                 휴게

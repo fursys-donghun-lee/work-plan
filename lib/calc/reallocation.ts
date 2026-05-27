@@ -175,6 +175,8 @@ export function computeReallocation(
     finishTime: number | null;
     urgent: boolean;
     autoManaged: boolean;
+    dropped: boolean; // 잔업 안 하기로 하고 정지(이월)된 라인
+    otTarget: number; // 잔업 시 허용 최대 인원 (잔업인원 최소화용)
   }
 
   const gs: G[] = groupsInput.map((g) => ({
@@ -191,6 +193,8 @@ export function computeReallocation(
     finishTime: g.loadHours <= EPS ? startTime : null,
     urgent: !!g.urgent,
     autoManaged: !!g.autoManaged,
+    dropped: false,
+    otTarget: MAX_HEADCOUNT,
   }));
 
   const maxTime = startTime + MAX_WORKTIME;
@@ -347,35 +351,58 @@ export function computeReallocation(
 
   let guard = 0;
   while (guard++ < 1000 && time < maxTime - EPS) {
-    // 0) 잔업 진입 판단 — 표준시간 도달 시, 여유인력을 최적 배치한다고 가정해도
-    //    남은 잔업 작업시간이 2h 이하이면 잔업 생략(남은 부하 이월)
+    // 0) 잔업 진입 판단 (잔업인원 최소화) — 표준시간 도달 시 라인별로:
+    //    · 잔업하면 인원은 어차피 3시간 고정 → '잔업인원'을 최소화
+    //    · 남은 부하 < 2인시: 잔업 안 함 → 이월, 인원 방출(다른 라인 도움/귀가)
+    //    · 2~4인시: 1명만 잔업 / 4인시 이상: 2명 (각자 ≥2h 작업하도록 최소 인원)
     if (Math.abs(time - standardEnd) < EPS) {
-      const act = gs
-        .filter((g) => !g.autoManaged && g.remaining > EPS && hc(g) > 0)
-        .map((g) => ({ remaining: g.remaining, head: hc(g) }));
-      let pool = freePool.length;
-      while (pool > 0) {
-        const cand = act
-          .filter((a) => a.head < MAX_HEADCOUNT)
-          .sort((a, b) => b.remaining / b.head - a.remaining / a.head)[0];
-        if (!cand) break;
-        cand.head += 1;
-        pool -= 1;
+      for (const g of gs) {
+        if (g.autoManaged || g.dropped) continue;
+        if (g.remaining <= EPS) continue;
+        const target =
+          g.remaining < OT_SKIP_THRESHOLD - EPS
+            ? 0
+            : g.remaining < 2 * OT_SKIP_THRESHOLD - EPS
+              ? 1
+              : MAX_HEADCOUNT;
+        g.otTarget = target;
+        if (hc(g) > target) {
+          closeSeg(g);
+          let toRelease = hc(g) - target;
+          while (toRelease > 0 && g.added > 0) {
+            g.added -= 1;
+            freePool.push({ origin: g.name });
+            toRelease -= 1;
+          }
+          while (toRelease > 0 && g.base > 0) {
+            g.base -= 1;
+            freePool.push({ origin: g.name });
+            toRelease -= 1;
+          }
+          g.segBase = g.base;
+          g.segAdded = g.added;
+        }
+        if (target === 0) g.dropped = true;
       }
-      const otNeed = act.reduce(
-        (mx, a) => Math.max(mx, a.remaining / a.head),
-        0
+      // 활성(잔업할) 라인이 없으면 종료
+      const anyActive = gs.some(
+        (g) => !g.autoManaged && !g.dropped && g.remaining > EPS && hc(g) > 0
       );
-      if (otNeed <= OT_SKIP_THRESHOLD + EPS) break;
+      const poolUsable =
+        freePool.length > 0 &&
+        gs.some(
+          (g) => !g.autoManaged && !g.dropped && g.remaining > EPS && hc(g) < g.otTarget
+        );
+      if (!anyActive && !poolUsable) break;
     }
 
     // 1) 여유 인력 배치 (autoManaged 제외 / 최대 2명 / 1시간 이상 작업 가능)
     while (freePool.length > 0) {
       const remToMax = maxTime - time;
       const candidates = gs.filter((g) => {
-        if (g.autoManaged) return false;
+        if (g.autoManaged || g.dropped) return false;
         if (g.remaining <= EPS) return false;
-        if (hc(g) >= MAX_HEADCOUNT) return false;
+        if (hc(g) >= g.otTarget) return false; // 잔업인원 최소화: 라인별 허용 인원까지만
         const projected = g.remaining / (hc(g) + 1);
         return Math.min(projected, remToMax) >= MIN_WORK_TO_MOVE - EPS;
       });
