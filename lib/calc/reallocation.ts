@@ -127,22 +127,30 @@ export function computeReallocation(
       if (withLoad.length === 0) break;
 
       let target: G;
-      // 1순위: 긴급(D-1/D-2) 라인 중 최소 인원(2명) 미달 → 우선 채움
+      const bottleneck = (a: G, b: G) => {
+        const fa = a.headcount > 0 ? a.remaining / a.headcount : Infinity;
+        const fb = b.headcount > 0 ? b.remaining / b.headcount : Infinity;
+        if (Math.abs(fa - fb) > EPS) return fb - fa;
+        if (!!a.urgent !== !!b.urgent) return a.urgent ? -1 : 1;
+        return 0;
+      };
+
+      // 1순위: 긴급(D-1/D-2) 라인 2명 미달 → 우선 채움
       const urgentNeed = withLoad
         .filter((g) => g.urgent && g.headcount < URGENT_MIN_HEADCOUNT)
-        .sort((a, b) => a.headcount - b.headcount);
+        .sort((a, b) => a.headcount - b.headcount || bottleneck(a, b));
+      // 2순위: 부하 있는데 1명(솔로) → 2명 짝 만들기 (1명 단독작업 회피)
+      const soloGroups = withLoad
+        .filter((g) => g.headcount === 1)
+        .sort(bottleneck);
+
       if (urgentNeed.length > 0) {
         target = urgentNeed[0];
+      } else if (soloGroups.length > 0) {
+        target = soloGroups[0];
       } else {
-        // 2순위: 병목 (가장 늦게 끝나는 그룹). 동률이면 긴급 라인 우선.
-        const sorted = [...withLoad].sort((a, b) => {
-          const fa = a.headcount > 0 ? a.remaining / a.headcount : Infinity;
-          const fb = b.headcount > 0 ? b.remaining / b.headcount : Infinity;
-          if (Math.abs(fa - fb) > EPS) return fb - fa;
-          if (!!a.urgent !== !!b.urgent) return a.urgent ? -1 : 1;
-          return 0;
-        });
-        target = sorted[0];
+        // 3순위: 병목 (가장 늦게 끝나는 그룹)
+        target = [...withLoad].sort(bottleneck)[0];
       }
       const worker = freePool.shift()!;
       closeSeg(target, target.headcount + 1);

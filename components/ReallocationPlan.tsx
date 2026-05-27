@@ -8,7 +8,6 @@ import {
   splitWorkSegment,
   workTimeToWall,
   STANDARD_WORKTIME,
-  STANDARD_END_WALL,
   type ReallocGroupInput,
 } from "@/lib/calc/reallocation";
 import { ArrowRight, ChevronDown, ChevronUp, Clock } from "lucide-react";
@@ -26,15 +25,50 @@ export function ReallocationPlan({ groups }: Props) {
   const loadedGroups = groups.filter((g) => g.loadHours > 0.01);
   if (loadedGroups.length === 0) return null;
 
-  // 벽시계 변환
+  // 간트 축: 하루 전체 고정 (08:30 ~ 21:00) — 블록 그리드 일관성
+  const AXIS_START = 8.5;
+  const AXIS_END = 21.0;
+  const span = AXIS_END - AXIS_START; // 12.5h
+  const pct = (wall: number) => ((wall - AXIS_START) / span) * 100;
+
+  // 시간 블록 경계 + 휴게 구간
+  const BLOCK_TICKS = [8.5, 10.5, 12.5, 13.5, 15.5, 17.5, 18.0, 21.0];
+  const BREAK_BANDS = [
+    { start: 12.5, end: 13.5 }, // 점심
+    { start: 17.5, end: 18.0 }, // 저녁
+  ];
+
   const startWall = workTimeToWall(0); // 08:30
   const endWall = workTimeToWall(result.actualEnd);
-  const spanWall = Math.max(endWall - startWall, 0.5);
-  const pct = (wall: number) => ((wall - startWall) / spanWall) * 100;
+  void startWall;
+  void endWall;
 
   const overtimeWorkHours = Math.max(0, result.actualEnd - STANDARD_WORKTIME);
   const hasOvertime = overtimeWorkHours > 1e-6;
   const cannotFinish = result.actualEnd > 11 + 1e-6; // 21:00 초과
+
+  // 트랙 배경 (휴게 음영 + 블록 경계선)
+  const trackBackground = (
+    <>
+      {BREAK_BANDS.map((b, i) => (
+        <div
+          key={`brk-${i}`}
+          className="absolute top-0 bottom-0 bg-slate-200/70"
+          style={{
+            left: `${pct(b.start)}%`,
+            width: `${pct(b.end) - pct(b.start)}%`,
+          }}
+        />
+      ))}
+      {BLOCK_TICKS.map((t, i) => (
+        <div
+          key={`tick-${i}`}
+          className="absolute top-0 bottom-0 border-l border-slate-300/60"
+          style={{ left: `${pct(t)}%` }}
+        />
+      ))}
+    </>
+  );
 
   return (
     <div className="card">
@@ -98,12 +132,30 @@ export function ReallocationPlan({ groups }: Props) {
             <h3 className="text-sm font-semibold text-slate-700 mb-2">
               그룹별 타임라인
             </h3>
+
+            {/* 시간축 헤더 */}
+            <div className="flex items-center gap-2 mb-1">
+              <div className="w-28 flex-shrink-0" />
+              <div className="flex-1 relative h-4">
+                {BLOCK_TICKS.map((t, i) => (
+                  <span
+                    key={i}
+                    className="absolute text-[9px] text-slate-400 -translate-x-1/2 whitespace-nowrap"
+                    style={{ left: `${pct(t)}%` }}
+                  >
+                    {formatHM(t)}
+                  </span>
+                ))}
+              </div>
+              <div className="w-14 flex-shrink-0" />
+            </div>
+
             <div className="space-y-1.5">
               {result.timelines
                 .filter((t) => t.loadHours > 0.01)
                 .map((t) => (
                   <div key={t.name} className="flex items-center gap-2">
-                    <div className="w-28 text-xs font-medium text-slate-700 truncate flex items-center gap-1">
+                    <div className="w-28 flex-shrink-0 text-xs font-medium text-slate-700 truncate flex items-center gap-1">
                       {t.urgent && (
                         <span className="text-rose-600" title="긴급건 라인">
                           ●
@@ -111,15 +163,10 @@ export function ReallocationPlan({ groups }: Props) {
                       )}
                       {t.name}
                     </div>
-                    <div className="flex-1 relative h-6 bg-slate-100 rounded">
-                      {/* 표준 종료(17:30) 경계선 */}
-                      {STANDARD_END_WALL < endWall && (
-                        <div
-                          className="absolute top-0 bottom-0 border-l-2 border-rose-400 border-dashed z-10"
-                          style={{ left: `${pct(STANDARD_END_WALL)}%` }}
-                          title="표준 종료 17:30"
-                        />
-                      )}
+                    <div className="flex-1 relative h-6 bg-slate-50 rounded overflow-hidden">
+                      {/* 휴게 음영 + 블록 경계선 (배경) */}
+                      {trackBackground}
+                      {/* 작업 막대 */}
                       {t.segments.flatMap((seg, si) =>
                         splitWorkSegment(seg.start, seg.end).map((w, wi) => {
                           const isOvertime = seg.end > STANDARD_WORKTIME + 1e-6;
@@ -142,7 +189,7 @@ export function ReallocationPlan({ groups }: Props) {
                         })
                       )}
                     </div>
-                    <div className="w-14 text-[11px] text-right">
+                    <div className="w-14 flex-shrink-0 text-[11px] text-right">
                       {t.finishTime !== null ? (
                         <span className="text-slate-500">
                           {formatHM(workTimeToWall(t.finishTime))}
@@ -168,7 +215,11 @@ export function ReallocationPlan({ groups }: Props) {
                 <span className="w-3 h-3 rounded bg-rose-500 inline-block" />
                 잔업(18:00~)
               </span>
-              <span>· 막대 안 숫자 = 투입 인원 · 빈칸 = 휴게/완료 · 우측 = 완료시각</span>
+              <span className="inline-flex items-center gap-1">
+                <span className="w-3 h-3 rounded bg-slate-200 inline-block" />
+                휴게
+              </span>
+              <span>· 막대 안 숫자 = 투입 인원 · 우측 = 완료시각</span>
             </div>
           </div>
 
