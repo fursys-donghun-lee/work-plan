@@ -25,6 +25,10 @@ export interface ReallocExtraFree {
 const MAX_WORKTIME = 11;
 // 긴급 라인 최소 투입 인원
 const URGENT_MIN_HEADCOUNT = 2;
+// 한 라인 최대 인원
+const MAX_HEADCOUNT = 2;
+// 새 라인 배치 최소 작업시간(h) — 이 시간 미만이면 이동 안 함
+const MIN_WORK_TO_MOVE = 1;
 
 export interface ReallocMove {
   time: number; // decimal hours
@@ -147,6 +151,17 @@ export function computeReallocation(
     for (let i = 0; i < ef.count; i++) freePool.push({ origin: ef.origin });
   }
 
+  // 한 라인 최대 2명 → 초과 인원은 여유 풀로
+  for (const g of gs) {
+    if (g.autoManaged) continue;
+    if (g.headcount > MAX_HEADCOUNT) {
+      const excess = g.headcount - MAX_HEADCOUNT;
+      for (let i = 0; i < excess; i++) freePool.push({ origin: g.name });
+      g.headcount = MAX_HEADCOUNT;
+      g.segHc = MAX_HEADCOUNT;
+    }
+  }
+
   // 시작 시 무부하 일반 그룹 인원은 즉시 여유 풀로
   for (const g of gs) {
     if (g.autoManaged) continue;
@@ -161,9 +176,18 @@ export function computeReallocation(
 
   let guard = 0;
   while (guard++ < 2000 && time < maxTime - EPS) {
-    // 1) 여유 인력 배치 (autoManaged 그룹 제외)
+    // 1) 여유 인력 배치 (autoManaged 제외 / 최대 2명 / 1시간 이상 작업 가능)
     while (freePool.length > 0) {
-      const withLoad = gs.filter((g) => !g.autoManaged && g.remaining > EPS);
+      const remToMax = maxTime - time;
+      const withLoad = gs.filter((g) => {
+        if (g.autoManaged) return false;
+        if (g.remaining <= EPS) return false;
+        if (g.headcount >= MAX_HEADCOUNT) return false; // 최대 2명
+        // 새 인원 투입 시 완료까지 = remaining/(headcount+1). 21:00 한도 적용.
+        const projected = g.remaining / (g.headcount + 1);
+        const actualWork = Math.min(projected, remToMax);
+        return actualWork >= MIN_WORK_TO_MOVE - EPS; // 1시간 이상 작업 가능할 때만
+      });
       if (withLoad.length === 0) break;
 
       let target: G;
