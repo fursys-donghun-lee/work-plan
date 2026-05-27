@@ -75,6 +75,8 @@ export interface ReallocResult {
   availableLoad: number; // 가용부하 = 인원 × 정규8h (인시)
   workHours: number; // 작업시간 = 정규시간 내 실제 투입 인시
   idleHours: number; // 유휴 시간 (정규 미투입 + 잔업 중 노는 시간, 인시)
+  regularIdleHours: number; // 정규시간 유휴 (가용부하 − 작업시간)
+  overtimeIdleHours: number; // 잔업 유휴 (잔업 인원이 잔업 슬롯에서 노는 시간)
   overtimePeople: number; // 잔업인원 (잔업 2h 이상 라인만)
   overtimePersonHours: number; // 잔업시간 (인시)
 }
@@ -97,6 +99,8 @@ function computeMetrics(
   availableLoad: number;
   workHours: number;
   idleHours: number;
+  regularIdleHours: number;
+  overtimeIdleHours: number;
   overtimePeople: number;
   overtimePersonHours: number;
 } {
@@ -141,11 +145,14 @@ function computeMetrics(
       ? Math.max(0, otPeople * (otOperationEnd - otStart) - otWork)
       : 0;
   const availableLoad = totalPeople * standardHours;
-  const idleHours = Math.max(0, availableLoad - regularWork) + overtimeIdle;
+  const regularIdle = Math.max(0, availableLoad - regularWork);
+  const idleHours = regularIdle + overtimeIdle;
   return {
     availableLoad: Math.round(availableLoad * 2) / 2,
     workHours: Math.round(regularWork * 2) / 2,
     idleHours: Math.round(idleHours * 2) / 2,
+    regularIdleHours: Math.round(regularIdle * 2) / 2,
+    overtimeIdleHours: Math.round(overtimeIdle * 2) / 2,
     overtimePeople,
     overtimePersonHours: Math.round(otWork * 2) / 2,
   };

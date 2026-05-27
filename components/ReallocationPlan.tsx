@@ -109,7 +109,8 @@ export function ReallocationPlan({
         <div className="mt-4 space-y-5">
           {/* 요약 지표 */}
           <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
-            {[
+            {(
+              [
               {
                 label: "직접 출근인원",
                 value: `${result.totalPeople}명`,
@@ -129,6 +130,7 @@ export function ReallocationPlan({
                 label: "유휴시간",
                 value: `${result.idleHours.toFixed(1)}인시`,
                 tone: result.idleHours > 0.01 ? ("rose" as const) : ("slate" as const),
+                hint: `정규 유휴 ${result.regularIdleHours.toFixed(1)}인시 + 잔업 유휴 ${result.overtimeIdleHours.toFixed(1)}인시`,
               },
               {
                 label: "인력 가동률",
@@ -151,9 +153,16 @@ export function ReallocationPlan({
                 tone:
                   result.overtimePersonHours > 0.01 ? ("rose" as const) : ("slate" as const),
               },
-            ].map((s) => (
+            ] as {
+              label: string;
+              value: string;
+              tone: "slate" | "blue" | "rose" | "amber" | "emerald";
+              hint?: string;
+            }[]
+            ).map((s) => (
               <div
                 key={s.label}
+                title={s.hint}
                 className={cn(
                   "rounded-lg border px-3 py-2",
                   s.tone === "rose"
