@@ -39,6 +39,12 @@ export function ReallocationPlan({
   const loadedGroups = groups.filter((g) => g.loadHours > 0.01);
   if (loadedGroups.length === 0) return null;
 
+  // 인력 가동률 = 실제 투입 인시 / 가용 인시 = (가용 − 유휴) / 가용
+  const utilization =
+    result.availableLoad > 0
+      ? ((result.availableLoad - result.idleHours) / result.availableLoad) * 100
+      : 0;
+
   // 간트 축: 하루 전체 고정 (08:30 ~ 21:00) — 블록 그리드 일관성
   const AXIS_START = 8.5;
   const AXIS_END = 21.0;
@@ -101,7 +107,7 @@ export function ReallocationPlan({
       {open && (
         <div className="mt-4 space-y-5">
           {/* 요약 지표 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
             {[
               {
                 label: "직접 출근인원",
@@ -117,6 +123,11 @@ export function ReallocationPlan({
                 label: "가용부하",
                 value: `${result.availableLoad.toFixed(1)}인시`,
                 tone: "blue" as const,
+              },
+              {
+                label: "인력 가동률",
+                value: `${utilization.toFixed(0)}%`,
+                tone: "emerald" as const,
               },
               {
                 label: "유휴 시간",
@@ -150,7 +161,9 @@ export function ReallocationPlan({
                       ? "border-amber-200 bg-amber-50"
                       : s.tone === "blue"
                         ? "border-blue-200 bg-blue-50"
-                        : "border-slate-200 bg-slate-50"
+                        : s.tone === "emerald"
+                          ? "border-emerald-200 bg-emerald-50"
+                          : "border-slate-200 bg-slate-50"
                 )}
               >
                 <div className="text-[11px] text-slate-500 whitespace-nowrap">
@@ -165,7 +178,9 @@ export function ReallocationPlan({
                         ? "text-amber-700"
                         : s.tone === "blue"
                           ? "text-blue-700"
-                          : "text-slate-800"
+                          : s.tone === "emerald"
+                            ? "text-emerald-700"
+                            : "text-slate-800"
                   )}
                 >
                   {s.value}

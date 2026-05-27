@@ -1,17 +1,37 @@
 "use client";
 
+import { useMemo } from "react";
 import Link from "next/link";
+import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useHydrated } from "@/components/useComputed";
 import { EmptyState } from "@/components/EmptyState";
 import { ReallocationPlan } from "@/components/ReallocationPlan";
 import { useDaerimRealloc } from "@/components/useDaerimRealloc";
+import {
+  computeReallocation,
+  type ReallocResult,
+} from "@/lib/calc/reallocation";
+import { cn } from "@/lib/utils";
+
+const utilOf = (r: { availableLoad: number; idleHours: number }) =>
+  r.availableLoad > 0 ? ((r.availableLoad - r.idleHours) / r.availableLoad) * 100 : 0;
 
 // 재배치 계획 비교 탭: 기본 배치(이동 없음) vs 재배치 로직 두 간트를 위·아래로 표시
 export function DaerimPlanView() {
   const hydrated = useHydrated();
   const workDate = useDataStore((s) => s.workDate);
   const { groups, extraFree, missing } = useDaerimRealloc();
+
+  // 기본 배치 vs 재배치 결과 → 개선 효과(델타) 계산
+  const rBasic = useMemo(
+    () => computeReallocation(groups, 0, 8, extraFree, true),
+    [groups, extraFree]
+  );
+  const rReal = useMemo(
+    () => computeReallocation(groups, 0, 8, extraFree, false),
+    [groups, extraFree]
+  );
 
   if (!hydrated) return null;
 
@@ -49,6 +69,9 @@ export function DaerimPlanView() {
         </Link>
       </div>
 
+      {/* 재배치 개선 효과 (기본 배치 → 재배치) */}
+      <ImprovementSummary rBasic={rBasic} rReal={rReal} />
+
       {/* 1) 기본 배치 (이동 없음) */}
       <ReallocationPlan
         groups={groups}
@@ -65,6 +88,116 @@ export function DaerimPlanView() {
         title="② 재배치 로직 적용 (잔업 최소화)"
         defaultOpen
       />
+    </div>
+  );
+}
+
+// 기본 배치 → 재배치 결과의 핵심 지표 변화(개선 효과)
+function ImprovementSummary({
+  rBasic,
+  rReal,
+}: {
+  rBasic: ReallocResult;
+  rReal: ReallocResult;
+}) {
+  const items: {
+    label: string;
+    base: number;
+    real: number;
+    fmtVal: (v: number) => string;
+    fmtDelta: (d: number) => string;
+    betterUp: boolean;
+  }[] = [
+    {
+      label: "인력 가동률",
+      base: utilOf(rBasic),
+      real: utilOf(rReal),
+      fmtVal: (v) => `${v.toFixed(0)}%`,
+      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(0)}%p`,
+      betterUp: true,
+    },
+    {
+      label: "유휴 시간",
+      base: rBasic.idleHours,
+      real: rReal.idleHours,
+      fmtVal: (v) => `${v.toFixed(1)}인시`,
+      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(1)}인시`,
+      betterUp: false,
+    },
+    {
+      label: "잔업 인원",
+      base: rBasic.overtimePeople,
+      real: rReal.overtimePeople,
+      fmtVal: (v) => `${v}명`,
+      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d}명`,
+      betterUp: false,
+    },
+    {
+      label: "잔업 시간",
+      base: rBasic.overtimePersonHours,
+      real: rReal.overtimePersonHours,
+      fmtVal: (v) => `${v.toFixed(1)}인시`,
+      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(1)}인시`,
+      betterUp: false,
+    },
+    {
+      label: "이월",
+      base: rBasic.totalCarry,
+      real: rReal.totalCarry,
+      fmtVal: (v) => `${v.toFixed(1)}인시`,
+      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(1)}인시`,
+      betterUp: false,
+    },
+  ];
+
+  return (
+    <div className="card border-emerald-100 bg-gradient-to-br from-emerald-50/60 to-white">
+      <h2 className="font-semibold text-slate-900 flex items-center gap-2 mb-3">
+        <TrendingUp className="w-4 h-4 text-emerald-600" />
+        재배치 개선 효과
+        <span className="text-xs font-normal text-slate-500">
+          기본 배치 → 재배치 로직
+        </span>
+      </h2>
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
+        {items.map((it) => {
+          const delta = it.real - it.base;
+          const flat = Math.abs(delta) < 1e-6;
+          const improved = !flat && (it.betterUp ? delta > 0 : delta < 0);
+          const Icon = flat ? Minus : improved ? TrendingUp : TrendingDown;
+          const tone = flat
+            ? "text-slate-400"
+            : improved
+              ? "text-emerald-700"
+              : "text-rose-700";
+          return (
+            <div
+              key={it.label}
+              className="rounded-lg border border-slate-200 bg-white px-3 py-2"
+            >
+              <div className="text-[11px] text-slate-500">{it.label}</div>
+              <div className="flex items-baseline gap-1.5 mt-0.5">
+                <span className="text-sm text-slate-400">
+                  {it.fmtVal(it.base)}
+                </span>
+                <span className="text-slate-300">→</span>
+                <span className="text-base font-bold text-slate-800">
+                  {it.fmtVal(it.real)}
+                </span>
+              </div>
+              <div
+                className={cn(
+                  "flex items-center gap-0.5 text-xs font-semibold mt-0.5",
+                  tone
+                )}
+              >
+                <Icon className="w-3 h-3" />
+                {flat ? "변화 없음" : it.fmtDelta(delta)}
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }
