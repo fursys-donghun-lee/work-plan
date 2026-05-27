@@ -16,6 +16,7 @@ import { computePackage2Load } from "@/lib/calc/package2Load";
 import { computeDohoPaintLoad } from "@/lib/calc/dohoPaintLoad";
 import { computeAll } from "@/lib/calc";
 import { computeUrgentByGroup, getUrgentFor } from "@/lib/calc/urgentLoad";
+import { ReallocationPlan } from "@/components/ReallocationPlan";
 import { cn } from "@/lib/utils";
 import {
   PACKAGE2_GROUPS,
@@ -548,6 +549,16 @@ export function DaerimFloorView() {
           })}
         </div>
       </div>
+
+      {/* 시간대별 재배치 계획 */}
+      <ReallocationPlan
+        groups={directGroups.map((g) => ({
+          name: g.group,
+          loadHours: g.loadHours,
+          headcount: g.presentMembers.length + g.supportCount,
+        }))}
+        startTime={8.5}
+      />
 
       {/* 미배치 인원 (간단 안내) */}
       {unassignedMembers.length > 0 && (
