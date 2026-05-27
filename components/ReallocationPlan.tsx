@@ -171,7 +171,7 @@ export function ReallocationPlan({ groups, extraFree = [] }: Props) {
                     <div className="flex-1 relative h-6 bg-slate-50 rounded overflow-hidden">
                       {/* 휴게 음영 + 블록 경계선 (배경) */}
                       {trackBackground}
-                      {/* 작업 막대 — 기존(파랑)/이동추가(주황) 세로 분할 */}
+                      {/* 작업 막대 — 이동 인원 포함 시 주황, 아니면 파랑 */}
                       {t.segments.flatMap((seg, si) =>
                         splitWorkSegment(seg.start, seg.end).map((w, wi) => {
                           const total = seg.base + seg.added;
@@ -179,28 +179,17 @@ export function ReallocationPlan({ groups, extraFree = [] }: Props) {
                           return (
                             <div
                               key={`${si}-${wi}`}
-                              className="absolute top-0 bottom-0 rounded overflow-hidden flex flex-col"
+                              className={cn(
+                                "absolute top-0 bottom-0 rounded flex items-center justify-center text-[10px] font-semibold text-white",
+                                seg.added > 0 ? "bg-orange-400" : "bg-blue-500"
+                              )}
                               style={{
                                 left: `${pct(w.start)}%`,
                                 width: `${Math.max(pct(w.end) - pct(w.start), 1.5)}%`,
                               }}
                               title={`${formatHM(w.start)}~${formatHM(w.end)} · 기존 ${seg.base} / 이동 ${seg.added}`}
                             >
-                              {seg.added > 0 && (
-                                <div
-                                  className="bg-orange-400 w-full"
-                                  style={{ height: `${(seg.added / total) * 100}%` }}
-                                />
-                              )}
-                              {seg.base > 0 && (
-                                <div
-                                  className="bg-blue-500 w-full"
-                                  style={{ height: `${(seg.base / total) * 100}%` }}
-                                />
-                              )}
-                              <span className="absolute inset-0 flex items-center justify-center text-[10px] font-semibold text-white">
-                                {total}
-                              </span>
+                              {total}
                             </div>
                           );
                         })
@@ -226,17 +215,17 @@ export function ReallocationPlan({ groups, extraFree = [] }: Props) {
             <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-400 flex-wrap">
               <span className="inline-flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-blue-500 inline-block" />
-                기존 인원
+                기존 인원만
               </span>
               <span className="inline-flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-orange-400 inline-block" />
-                이동 추가
+                이동 인원 포함
               </span>
               <span className="inline-flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-slate-200 inline-block" />
                 휴게
               </span>
-              <span>· 막대 안 숫자 = 투입 인원 · 우측 = 완료시각</span>
+              <span>· 막대 안 숫자 = 투입 인원 · 마우스 올리면 기존/이동 상세 · 우측 = 완료시각</span>
             </div>
           </div>
 
