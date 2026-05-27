@@ -314,24 +314,14 @@ export function computeReallocation(
     for (let i = 0; i < ef.count; i++) freePool.push({ origin: ef.origin });
   }
 
-  // 아침 선제 재배치: 정규시간 내 완료에 필요한 인원만 남기고 나머지는 여유 풀로
-  //  · 최소 필요 인원 = ceil(부하 / 정규8h) (1명 이상, 최대 2명), 긴급라인은 2명 유지
-  //  · 여유 라인의 잉여 인원을 아침부터 병목(MM-04 등)에 보낼 수 있게 함
+  // 한 라인 최대 2명(짝) → 초과 인원만 여유 풀로 (짝은 유지)
   for (const g of gs) {
     if (g.autoManaged) continue;
-    if (g.remaining <= EPS) continue;
-    const need = g.urgent
-      ? MAX_HEADCOUNT
-      : Math.min(
-          MAX_HEADCOUNT,
-          Math.max(1, Math.ceil(g.loadHours / standardHours - EPS))
-        );
-    const keep = Math.min(g.base, need);
-    if (g.base > keep) {
-      const excess = g.base - keep;
+    if (g.base > MAX_HEADCOUNT) {
+      const excess = g.base - MAX_HEADCOUNT;
       for (let i = 0; i < excess; i++) freePool.push({ origin: g.name });
-      g.base = keep;
-      g.segBase = keep;
+      g.base = MAX_HEADCOUNT;
+      g.segBase = MAX_HEADCOUNT;
     }
   }
 
@@ -358,20 +348,15 @@ export function computeReallocation(
 
   let guard = 0;
   while (guard++ < 1000 && time < maxTime - EPS) {
-    // 0) 잔업 진입 판단 (잔업인원 최소화) — 표준시간 도달 시 라인별로:
-    //    · 잔업하면 인원은 어차피 3시간 고정 → '잔업인원'을 최소화
-    //    · 남은 부하 < 2인시: 잔업 안 함 → 이월, 인원 방출(다른 라인 도움/귀가)
-    //    · 2~4인시: 1명만 잔업 / 4인시 이상: 2명 (각자 ≥2h 작업하도록 최소 인원)
+    // 0) 잔업 진입 판단 (짝 우선) — 표준시간 도달 시 라인별로:
+    //    · 잔업하는 라인은 2명 짝으로 운영 (정규·잔업 모두 짝 우선)
+    //    · 단, 2명이 ≥2h 잔업할 만큼(남은 부하 ≥4인시)일 때만 잔업, 그 미만은 이월
     if (Math.abs(time - standardEnd) < EPS) {
       for (const g of gs) {
         if (g.autoManaged || g.dropped) continue;
         if (g.remaining <= EPS) continue;
         const target =
-          g.remaining < OT_SKIP_THRESHOLD - EPS
-            ? 0
-            : g.remaining < 2 * OT_SKIP_THRESHOLD - EPS
-              ? 1
-              : MAX_HEADCOUNT;
+          g.remaining < 2 * OT_SKIP_THRESHOLD - EPS ? 0 : MAX_HEADCOUNT;
         g.otTarget = target;
         if (hc(g) > target) {
           closeSeg(g);
@@ -409,20 +394,25 @@ export function computeReallocation(
       const candidates = gs.filter((g) => {
         if (g.autoManaged || g.dropped) return false;
         if (g.remaining <= EPS) return false;
-        if (hc(g) >= g.otTarget) return false; // 잔업인원 최소화: 라인별 허용 인원까지만
+        if (hc(g) >= g.otTarget) return false; // 라인별 허용 인원(최대 2명 짝)까지만
         const projected = g.remaining / (hc(g) + 1);
         return Math.min(projected, remToMax) >= MIN_WORK_TO_MOVE - EPS;
       });
       if (candidates.length === 0) break;
 
-      // 긴급라인(2명 미만) 우선 → 그 외에는 병목(가장 늦게 끝나는 라인) 우선
-      //  · 정시 완료될 1명 라인 짝짓기보다 잔업 위험 병목을 먼저 채워 잔업 최소화
+      // 배치 우선순위 (짝 우선):
+      //  1) 긴급라인(2명 미만)  2) 인원 0명 라인 먼저 가동(라인 안 죽게)
+      //  3) 1명 라인 짝짓기(2명)  4) 그 외 병목
       let target: G;
       const urgentNeed = candidates
         .filter((g) => g.urgent && hc(g) < URGENT_MIN_HEADCOUNT)
         .sort((a, b) => hc(a) - hc(b) || bottleneck(a, b));
+      const zeroLines = candidates.filter((g) => hc(g) === 0).sort(bottleneck);
+      const soloLines = candidates.filter((g) => hc(g) === 1).sort(bottleneck);
 
       if (urgentNeed.length > 0) target = urgentNeed[0];
+      else if (zeroLines.length > 0) target = zeroLines[0];
+      else if (soloLines.length > 0) target = soloLines[0];
       else target = [...candidates].sort(bottleneck)[0];
 
       // 타깃이 출발 라인인 인원이 풀에 있으면 그를 복귀(기존 인원)시켜 자기 라인 이동 표시 방지
