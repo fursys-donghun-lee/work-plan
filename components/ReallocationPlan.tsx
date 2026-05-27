@@ -227,7 +227,7 @@ export function ReallocationPlan({
                         return splitWorkSegment(f, idleEnd).map((w, wi) => (
                           <div
                             key={`idle-${wi}`}
-                            className="absolute top-0 bottom-0 bg-rose-300/50"
+                            className="absolute top-0 bottom-0 bg-rose-400/55"
                             style={{
                               left: `${pct(w.start)}%`,
                               width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
@@ -236,7 +236,7 @@ export function ReallocationPlan({
                           />
                         ));
                       })()}
-                      {/* 작업 막대 — 이동 인원 포함 시 초록, 아니면 파랑 */}
+                      {/* 작업 막대 — 이동 인원 포함 시 연한 노랑, 아니면 파랑 */}
                       {t.segments.flatMap((seg, si) =>
                         splitWorkSegment(seg.start, seg.end).map((w, wi) => {
                           const total = seg.base + seg.added;
@@ -245,8 +245,10 @@ export function ReallocationPlan({
                             <div
                               key={`${si}-${wi}`}
                               className={cn(
-                                "absolute top-0 bottom-0 rounded flex items-center justify-center text-[10px] font-semibold text-white",
-                                seg.added > 0 ? "bg-emerald-500" : "bg-blue-500"
+                                "absolute top-0 bottom-0 rounded flex items-center justify-center text-[10px] font-semibold",
+                                seg.added > 0
+                                  ? "bg-yellow-200 text-slate-800"
+                                  : "bg-blue-500 text-white"
                               )}
                               style={{
                                 left: `${pct(w.start)}%`,
@@ -283,7 +285,7 @@ export function ReallocationPlan({
                 기존 인원만
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-emerald-500 inline-block" />
+                <span className="w-3 h-3 rounded bg-yellow-200 border border-yellow-300 inline-block" />
                 이동 인원 포함
               </span>
               <span className="inline-flex items-center gap-1">
@@ -291,7 +293,7 @@ export function ReallocationPlan({
                 휴게
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-rose-300/50 inline-block" />
+                <span className="w-3 h-3 rounded bg-rose-400/55 inline-block" />
                 유휴(버려진) 시간
               </span>
               <span>· 막대 안 숫자 = 투입 인원 · 마우스 올리면 기존/이동 상세 · 우측 = 완료시각</span>
