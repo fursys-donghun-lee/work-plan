@@ -303,14 +303,24 @@ export function computeReallocation(
     for (let i = 0; i < ef.count; i++) freePool.push({ origin: ef.origin });
   }
 
-  // 한 라인 최대 2명 → 초과 base 인원은 여유 풀로
+  // 아침 선제 재배치: 정규시간 내 완료에 필요한 인원만 남기고 나머지는 여유 풀로
+  //  · 최소 필요 인원 = ceil(부하 / 정규8h) (1명 이상, 최대 2명), 긴급라인은 2명 유지
+  //  · 여유 라인의 잉여 인원을 아침부터 병목(MM-04 등)에 보낼 수 있게 함
   for (const g of gs) {
     if (g.autoManaged) continue;
-    if (g.base > MAX_HEADCOUNT) {
-      const excess = g.base - MAX_HEADCOUNT;
+    if (g.remaining <= EPS) continue;
+    const need = g.urgent
+      ? MAX_HEADCOUNT
+      : Math.min(
+          MAX_HEADCOUNT,
+          Math.max(1, Math.ceil(g.loadHours / standardHours - EPS))
+        );
+    const keep = Math.min(g.base, need);
+    if (g.base > keep) {
+      const excess = g.base - keep;
       for (let i = 0; i < excess; i++) freePool.push({ origin: g.name });
-      g.base = MAX_HEADCOUNT;
-      g.segBase = MAX_HEADCOUNT;
+      g.base = keep;
+      g.segBase = keep;
     }
   }
 
@@ -371,23 +381,29 @@ export function computeReallocation(
       });
       if (candidates.length === 0) break;
 
+      // 긴급라인(2명 미만) 우선 → 그 외에는 병목(가장 늦게 끝나는 라인) 우선
+      //  · 정시 완료될 1명 라인 짝짓기보다 잔업 위험 병목을 먼저 채워 잔업 최소화
       let target: G;
       const urgentNeed = candidates
         .filter((g) => g.urgent && hc(g) < URGENT_MIN_HEADCOUNT)
         .sort((a, b) => hc(a) - hc(b) || bottleneck(a, b));
-      const soloGroups = candidates
-        .filter((g) => hc(g) === 1)
-        .sort(bottleneck);
 
       if (urgentNeed.length > 0) target = urgentNeed[0];
-      else if (soloGroups.length > 0) target = soloGroups[0];
       else target = [...candidates].sort(bottleneck)[0];
 
-      const worker = freePool.shift()!;
+      // 타깃이 출발 라인인 인원이 풀에 있으면 그를 복귀(기존 인원)시켜 자기 라인 이동 표시 방지
+      const ownIdx = freePool.findIndex((w) => w.origin === target.name);
+      const worker =
+        ownIdx >= 0 ? freePool.splice(ownIdx, 1)[0] : freePool.shift()!;
       closeSeg(target);
-      target.added += 1;
-      target.segAdded = target.added;
-      rawMoves.push({ time, count: 1, from: worker.origin, to: target.name });
+      if (worker.origin === target.name) {
+        target.base += 1; // 원래 자기 라인으로 복귀 → 기존 인원(파랑)
+        target.segBase = target.base;
+      } else {
+        target.added += 1;
+        target.segAdded = target.added;
+        rawMoves.push({ time, count: 1, from: worker.origin, to: target.name });
+      }
     }
 
     // 2) 30분 진행
