@@ -52,7 +52,6 @@ export interface ReallocGroupTimeline {
   finishTime: number | null; // 부하 없으면 null, 이월이면 null
   carryHours: number; // 21:00까지 못 끝낸 이월 부하(인시)
   urgent: boolean;
-  autoManaged: boolean; // 자동포장 등 — 1명도 가동으로 인정
 }
 
 // 30분 단위 반올림
@@ -79,18 +78,14 @@ export interface ReallocResult {
 
 const EPS = 1e-6;
 
-// 라인이 '가동 중'인지 — 일반라인 2명 이상 / 자동포장라인 1명 이상
-export function isOperating(headcount: number, autoManaged: boolean): boolean {
-  return autoManaged ? headcount >= 1 : headcount >= 2;
-}
-
-// 세그먼트 기반 메트릭 (실가동/잔업/유휴)
+// 세그먼트 기반 메트릭 (투입/잔업/유휴)
 //
-// 유휴 = 가용부하(인원×정규8h) − 실가동 인시
-//   · 실가동 = '가동 중'인 라인-구간만 (1명 일반라인 등 비가동은 제외)
-//   · 인원 기준이라, 끝난 인원이 다른 라인에 가서 가동시키면 유휴로 안 잡힘
+// 유휴 = 가용부하(인원×정규8h) − 정규시간 내 실제 투입 인시
+//   · 투입 = 라인에 사람이 들어가 부하를 소진한 모든 인시 (1명도 포함)
+//   · 인원 기준이라, 끝난 인원이 다른 라인에 가서 일하면 유휴로 안 잡힘
+//   · 부하를 안 깎은 시간(작업 전 대기·종료 후·잉여)만 유휴로 남음
 function computeMetrics(
-  groups: { segments: ReallocSegment[]; autoManaged: boolean }[],
+  groups: { segments: ReallocSegment[] }[],
   startTime: number,
   standardHours: number,
   maxTime: number,
@@ -102,19 +97,17 @@ function computeMetrics(
   overtimePersonHours: number;
 } {
   const otStart = startTime + standardHours;
-  let productiveWork = 0; // 정규시간 내 '가동'으로 인정되는 인시
+  let regularWork = 0; // 정규시간 내 실제 투입 인시 (1명 포함)
   let otWork = 0;
   let overtimePeople = 0;
   for (const g of groups) {
     let maxOtHc = 0;
     for (const seg of g.segments) {
       const h = seg.base + seg.added;
-      // 정규시간 내 가동 인시 (비가동 구간은 제외 → 유휴로 흡수)
-      if (isOperating(h, g.autoManaged)) {
-        const hi = Math.min(seg.end, otStart);
-        const lo = Math.max(seg.start, startTime);
-        if (hi > lo) productiveWork += (hi - lo) * h;
-      }
+      // 정규시간 내 투입 인시
+      const hi = Math.min(seg.end, otStart);
+      const lo = Math.max(seg.start, startTime);
+      if (hi > lo) regularWork += (hi - lo) * h;
       // 잔업 인시/인원 (실제 잔업 투입 기준)
       const otHi = Math.min(seg.end, maxTime);
       const otLo = Math.max(seg.start, otStart);
@@ -126,7 +119,7 @@ function computeMetrics(
     overtimePeople += maxOtHc;
   }
   const availableLoad = totalPeople * standardHours;
-  const idleHours = Math.max(0, availableLoad - productiveWork);
+  const idleHours = Math.max(0, availableLoad - regularWork);
   return {
     availableLoad: Math.round(availableLoad * 2) / 2,
     idleHours: Math.round(idleHours * 2) / 2,
@@ -265,7 +258,6 @@ export function computeReallocation(
         finishTime: g.remaining > EPS ? null : g.finishTime,
         carryHours: round30(Math.max(0, g.remaining)),
         urgent: g.urgent,
-        autoManaged: g.autoManaged,
       })),
       totalLoad,
       totalPeople,
@@ -418,7 +410,6 @@ export function computeReallocation(
       finishTime: g.remaining > EPS ? null : g.finishTime,
       carryHours: round30(Math.max(0, g.remaining)),
       urgent: g.urgent,
-      autoManaged: g.autoManaged,
     })),
     totalLoad,
     totalPeople,
