@@ -9,18 +9,23 @@ import {
   workTimeToWall,
   STANDARD_WORKTIME,
   type ReallocGroupInput,
+  type ReallocExtraFree,
 } from "@/lib/calc/reallocation";
 import { ArrowRight, ChevronDown, ChevronUp, Clock } from "lucide-react";
 
 interface Props {
   groups: ReallocGroupInput[]; // 직접그룹 (피더 제외)
+  extraFree?: ReallocExtraFree[];
 }
 
-export function ReallocationPlan({ groups }: Props) {
+export function ReallocationPlan({ groups, extraFree = [] }: Props) {
   const [open, setOpen] = useState(false);
 
   // 시뮬레이션은 work-time(0부터, 휴게 제외 누적 작업시간) 기준
-  const result = useMemo(() => computeReallocation(groups, 0, 8), [groups]);
+  const result = useMemo(
+    () => computeReallocation(groups, 0, 8, extraFree),
+    [groups, extraFree]
+  );
 
   const loadedGroups = groups.filter((g) => g.loadHours > 0.01);
   if (loadedGroups.length === 0) return null;

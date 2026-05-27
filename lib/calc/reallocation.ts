@@ -12,6 +12,13 @@ export interface ReallocGroupInput {
   loadHours: number; // 인시
   headcount: number; // 초기 투입 인원 (출근 + 받은지원)
   urgent?: boolean; // D-1/D-2 긴급건 있는 라인 (우선 배치)
+  autoManaged?: boolean; // 자동포장 등 — 인원 고정, 재배치 풀 미참여
+}
+
+// 재배치 풀에 처음부터 들어가는 잉여 인력 (예: 자동포장라인 비자야 외 인원)
+export interface ReallocExtraFree {
+  origin: string;
+  count: number;
 }
 
 // 작업 마감 = work-time 11 (21:00). 이후 부하는 이월.
@@ -60,7 +67,8 @@ const EPS = 1e-6;
 export function computeReallocation(
   groupsInput: ReallocGroupInput[],
   startTime = 8.5,
-  standardHours = 8
+  standardHours = 8,
+  extraFree: ReallocExtraFree[] = []
 ): ReallocResult {
   const standardEnd = startTime + standardHours;
 
@@ -75,6 +83,7 @@ export function computeReallocation(
     segHc: number;
     finishTime: number | null;
     urgent: boolean;
+    autoManaged: boolean;
   }
 
   const gs: G[] = groupsInput.map((g) => ({
@@ -88,6 +97,7 @@ export function computeReallocation(
     segHc: g.headcount,
     finishTime: g.loadHours <= EPS ? startTime : null,
     urgent: !!g.urgent,
+    autoManaged: !!g.autoManaged,
   }));
 
   // work-time 기준이므로 startTime=0, 마감 = MAX_WORKTIME(11=21:00)
@@ -108,8 +118,38 @@ export function computeReallocation(
     g.segHc = newHc;
   };
 
-  // 시작 시 무부하 그룹 인원은 즉시 여유 풀로
+  // === 자동관리(autoManaged) 그룹: 인원 고정, 풀 미참여, 독립 처리 ===
   for (const g of gs) {
+    if (!g.autoManaged) continue;
+    if (g.loadHours > EPS && g.headcount > 0) {
+      const wt = g.loadHours / g.headcount; // 1인 기준 작업시간
+      const endWt = Math.min(startTime + wt, maxTime);
+      g.segments.push({
+        start: startTime,
+        end: endWt,
+        headcount: g.headcount,
+      });
+      if (startTime + wt <= maxTime + EPS) {
+        g.finishTime = startTime + wt;
+        g.remaining = 0;
+      } else {
+        g.finishTime = null;
+        g.remaining = g.loadHours - g.headcount * (maxTime - startTime);
+      }
+    } else {
+      g.finishTime = startTime;
+      g.remaining = 0;
+    }
+  }
+
+  // 초기 잉여 인력 (예: 자동포장 비자야 외)
+  for (const ef of extraFree) {
+    for (let i = 0; i < ef.count; i++) freePool.push({ origin: ef.origin });
+  }
+
+  // 시작 시 무부하 일반 그룹 인원은 즉시 여유 풀로
+  for (const g of gs) {
+    if (g.autoManaged) continue;
     if (g.remaining <= EPS && g.headcount > 0) {
       for (let i = 0; i < g.headcount; i++) freePool.push({ origin: g.name });
       g.segHc = 0;
@@ -121,9 +161,9 @@ export function computeReallocation(
 
   let guard = 0;
   while (guard++ < 2000 && time < maxTime - EPS) {
-    // 1) 여유 인력 배치
+    // 1) 여유 인력 배치 (autoManaged 그룹 제외)
     while (freePool.length > 0) {
-      const withLoad = gs.filter((g) => g.remaining > EPS);
+      const withLoad = gs.filter((g) => !g.autoManaged && g.remaining > EPS);
       if (withLoad.length === 0) break;
 
       let target: G;
@@ -159,7 +199,9 @@ export function computeReallocation(
     }
 
     // 2) 다음 완료 이벤트까지 진행 (단, 21:00 마감 초과 금지)
-    const active = gs.filter((g) => g.remaining > EPS && g.headcount > 0);
+    const active = gs.filter(
+      (g) => !g.autoManaged && g.remaining > EPS && g.headcount > 0
+    );
     if (active.length === 0) break;
     let dt = Infinity;
     for (const g of active) dt = Math.min(dt, g.remaining / g.headcount);
@@ -167,8 +209,9 @@ export function computeReallocation(
     for (const g of active) g.remaining -= g.headcount * dtCapped;
     time += dtCapped;
 
-    // 완료 그룹 → 인원 여유 풀로
+    // 완료 그룹 → 인원 여유 풀로 (autoManaged 제외)
     for (const g of gs) {
+      if (g.autoManaged) continue;
       if (g.remaining <= EPS && g.headcount > 0) {
         closeSeg(g, 0);
         g.finishTime = time;
@@ -180,8 +223,9 @@ export function computeReallocation(
     if (time >= maxTime - EPS) break; // 21:00 마감
   }
 
-  // 열린 세그먼트 닫기
+  // 열린 세그먼트 닫기 (autoManaged 는 이미 독립 처리됨)
   for (const g of gs) {
+    if (g.autoManaged) continue;
     if (g.segHc > 0 && g.segStart < time - EPS) {
       g.segments.push({ start: g.segStart, end: time, headcount: g.segHc });
     }

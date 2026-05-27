@@ -228,6 +228,41 @@ export function DaerimFloorView() {
     0
   );
 
+  // === 재배치 계획용 그룹 구성 ===
+  // PA-01, PA-02, 자동포장(파이프) → "자동포장라인" 으로 병합 (자동설비, 비자야 1명 고정)
+  const AUTO_GROUP_NAMES = new Set(["PA-01", "PA-02", "자동포장(파이프)"]);
+  const autoGroups = directGroups.filter((g) => AUTO_GROUP_NAMES.has(g.group));
+  const nonAutoGroups = directGroups.filter(
+    (g) => !AUTO_GROUP_NAMES.has(g.group)
+  );
+  const autoLoad = autoGroups.reduce((s, g) => s + g.loadHours, 0);
+  const autoPresent = autoGroups.reduce(
+    (s, g) => s + g.presentMembers.length + g.supportCount,
+    0
+  );
+  // 비자야 1명 고정 → 나머지는 재배치 풀로
+  const autoExtra = Math.max(0, autoPresent - 1);
+
+  const reallocGroups = [
+    ...nonAutoGroups.map((g) => {
+      const u = getUrgentFor(urgentMap, g.group);
+      return {
+        name: g.group,
+        loadHours: g.loadHours,
+        headcount: g.presentMembers.length + g.supportCount,
+        urgent: u.dMinus1 > 0 || u.dMinus2 > 0,
+      };
+    }),
+    {
+      name: "자동포장라인",
+      loadHours: autoLoad,
+      headcount: autoPresent > 0 ? 1 : 0,
+      autoManaged: true,
+    },
+  ];
+  const reallocExtraFree =
+    autoExtra > 0 ? [{ origin: "자동포장라인", count: autoExtra }] : [];
+
   // 그룹 선택 옵션 (받은 지원 슬롯 드롭다운용 — 피더 포함 전체)
   const groupOptions = PACKAGE2_GROUPS as readonly string[];
 
@@ -551,17 +586,7 @@ export function DaerimFloorView() {
       </div>
 
       {/* 시간대별 재배치 계획 */}
-      <ReallocationPlan
-        groups={directGroups.map((g) => {
-          const u = getUrgentFor(urgentMap, g.group);
-          return {
-            name: g.group,
-            loadHours: g.loadHours,
-            headcount: g.presentMembers.length + g.supportCount,
-            urgent: u.dMinus1 > 0 || u.dMinus2 > 0,
-          };
-        })}
-      />
+      <ReallocationPlan groups={reallocGroups} extraFree={reallocExtraFree} />
 
       {/* 미배치 인원 (간단 안내) */}
       {unassignedMembers.length > 0 && (
