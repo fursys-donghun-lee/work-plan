@@ -52,15 +52,6 @@ export function ReallocationPlan({
     { start: 17.5, end: 18.0 }, // 저녁
   ];
 
-  const startWall = workTimeToWall(0); // 08:30
-  const endWall = workTimeToWall(result.actualEnd);
-  void startWall;
-  void endWall;
-
-  const overtimeWorkHours = Math.max(0, result.actualEnd - STANDARD_WORKTIME);
-  const hasOvertime = overtimeWorkHours > 1e-6;
-  const cannotFinish = result.actualEnd > 11 + 1e-6; // 21:00 초과
-
   // 트랙 배경 (휴게 음영 + 블록 경계선)
   const trackBackground = (
     <>
@@ -109,38 +100,78 @@ export function ReallocationPlan({
 
       {open && (
         <div className="mt-4 space-y-5">
-          {/* 요약 */}
-          <div className="flex flex-wrap gap-2 text-sm">
-            <span className="px-2.5 py-1 rounded bg-slate-100 text-slate-700">
-              시작 <b>{formatHM(startWall)}</b>
-            </span>
-            <span className="px-2.5 py-1 rounded bg-slate-100 text-slate-700">
-              예상 완료 <b>{formatHM(endWall)}</b>
-            </span>
-            <span
-              className={cn(
-                "px-2.5 py-1 rounded",
-                cannotFinish
-                  ? "bg-rose-100 text-rose-800"
-                  : hasOvertime
-                    ? "bg-rose-50 text-rose-700"
-                    : "bg-emerald-50 text-emerald-700"
-              )}
-            >
-              {cannotFinish
-                ? "21:00 내 완료 불가 (인력 부족)"
-                : hasOvertime
-                  ? `잔업 필요 (작업 +${overtimeWorkHours.toFixed(1)}h)`
-                  : "정규시간 내 완료"}
-            </span>
-            <span className="px-2.5 py-1 rounded bg-slate-100 text-slate-700">
-              총부하 {result.totalLoad.toFixed(1)}인시 / {result.totalPeople}명
-            </span>
-            {result.totalCarry > 0.01 && (
-              <span className="px-2.5 py-1 rounded bg-amber-50 text-amber-700">
-                다음날 이월 {result.totalCarry.toFixed(1)}인시
-              </span>
-            )}
+          {/* 요약 지표 */}
+          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-2">
+            {[
+              {
+                label: "직접 출근인원",
+                value: `${result.totalPeople}명`,
+                tone: "slate" as const,
+              },
+              {
+                label: "총부하",
+                value: `${result.totalLoad.toFixed(1)}인시`,
+                tone: "slate" as const,
+              },
+              {
+                label: "가용부하",
+                value: `${result.availableLoad.toFixed(1)}인시`,
+                tone: "blue" as const,
+              },
+              {
+                label: "유휴 시간",
+                value: `${result.idleHours.toFixed(1)}인시`,
+                tone: result.idleHours > 0.01 ? ("rose" as const) : ("slate" as const),
+              },
+              {
+                label: "이월시간",
+                value: `${result.totalCarry.toFixed(1)}인시`,
+                tone: result.totalCarry > 0.01 ? ("amber" as const) : ("slate" as const),
+              },
+              {
+                label: "잔업인원",
+                value: `${result.overtimePeople}명`,
+                tone: result.overtimePeople > 0 ? ("rose" as const) : ("slate" as const),
+              },
+              {
+                label: "잔업시간",
+                value: `${result.overtimePersonHours.toFixed(1)}인시`,
+                tone:
+                  result.overtimePersonHours > 0.01 ? ("rose" as const) : ("slate" as const),
+              },
+            ].map((s) => (
+              <div
+                key={s.label}
+                className={cn(
+                  "rounded-lg border px-3 py-2",
+                  s.tone === "rose"
+                    ? "border-rose-200 bg-rose-50"
+                    : s.tone === "amber"
+                      ? "border-amber-200 bg-amber-50"
+                      : s.tone === "blue"
+                        ? "border-blue-200 bg-blue-50"
+                        : "border-slate-200 bg-slate-50"
+                )}
+              >
+                <div className="text-[11px] text-slate-500 whitespace-nowrap">
+                  {s.label}
+                </div>
+                <div
+                  className={cn(
+                    "text-base font-bold whitespace-nowrap",
+                    s.tone === "rose"
+                      ? "text-rose-700"
+                      : s.tone === "amber"
+                        ? "text-amber-700"
+                        : s.tone === "blue"
+                          ? "text-blue-700"
+                          : "text-slate-800"
+                  )}
+                >
+                  {s.value}
+                </div>
+              </div>
+            ))}
           </div>
 
           {/* 간트 차트 */}
@@ -182,6 +213,23 @@ export function ReallocationPlan({
                     <div className="flex-1 relative h-6 bg-slate-50 rounded overflow-hidden">
                       {/* 휴게 음영 + 블록 경계선 (배경) */}
                       {trackBackground}
+                      {/* 유휴(버려진) 시간 — 기본 배치에서 정규시간 전에 끝난 라인 */}
+                      {disableRealloc &&
+                        t.finishTime !== null &&
+                        t.finishTime < STANDARD_WORKTIME - 1e-6 &&
+                        splitWorkSegment(t.finishTime, STANDARD_WORKTIME).map(
+                          (w, wi) => (
+                            <div
+                              key={`idle-${wi}`}
+                              className="absolute top-0 bottom-0 bg-rose-300/50"
+                              style={{
+                                left: `${pct(w.start)}%`,
+                                width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
+                              }}
+                              title={`유휴 ${formatHM(w.start)}~${formatHM(w.end)} (작업 종료 후 미사용)`}
+                            />
+                          )
+                        )}
                       {/* 작업 막대 — 이동 인원 포함 시 주황, 아니면 파랑 */}
                       {t.segments.flatMap((seg, si) =>
                         splitWorkSegment(seg.start, seg.end).map((w, wi) => {
@@ -236,6 +284,12 @@ export function ReallocationPlan({
                 <span className="w-3 h-3 rounded bg-slate-200 inline-block" />
                 휴게
               </span>
+              {disableRealloc && (
+                <span className="inline-flex items-center gap-1">
+                  <span className="w-3 h-3 rounded bg-rose-300/50 inline-block" />
+                  유휴(버려진) 시간
+                </span>
+              )}
               <span>· 막대 안 숫자 = 투입 인원 · 마우스 올리면 기존/이동 상세 · 우측 = 완료시각</span>
             </div>
           </div>

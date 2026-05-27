@@ -67,12 +67,59 @@ export interface ReallocResult {
   overtimeHours: number;
   moves: ReallocMove[];
   timelines: ReallocGroupTimeline[];
-  totalLoad: number;
-  totalPeople: number;
-  totalCarry: number; // 다음날 이월 부하 합(인시)
+  totalLoad: number; // 총부하 (인시)
+  totalPeople: number; // 직접 출근인원
+  totalCarry: number; // 다음날 이월 부하 (인시)
+  availableLoad: number; // 가용부하 = 인원 × 정규8h (인시)
+  idleHours: number; // 유휴 시간 (정규시간 내 안 쓰인 인력, 인시)
+  overtimePeople: number; // 잔업인원
+  overtimePersonHours: number; // 잔업시간 (인시)
 }
 
 const EPS = 1e-6;
+
+// 세그먼트 기반 메트릭 (정규작업/잔업/유휴)
+function computeMetrics(
+  segmentsByGroup: { segments: ReallocSegment[] }[],
+  startTime: number,
+  standardHours: number,
+  maxTime: number,
+  totalPeople: number
+): {
+  availableLoad: number;
+  idleHours: number;
+  overtimePeople: number;
+  overtimePersonHours: number;
+} {
+  const otStart = startTime + standardHours;
+  let regularWork = 0;
+  let otWork = 0;
+  let overtimePeople = 0;
+  for (const g of segmentsByGroup) {
+    let maxOtHc = 0;
+    for (const seg of g.segments) {
+      const h = seg.base + seg.added;
+      const regHi = Math.min(seg.end, otStart);
+      const regLo = Math.max(seg.start, startTime);
+      if (regHi > regLo) regularWork += (regHi - regLo) * h;
+      const otHi = Math.min(seg.end, maxTime);
+      const otLo = Math.max(seg.start, otStart);
+      if (otHi > otLo) {
+        otWork += (otHi - otLo) * h;
+        maxOtHc = Math.max(maxOtHc, h);
+      }
+    }
+    overtimePeople += maxOtHc;
+  }
+  const availableLoad = totalPeople * standardHours;
+  const idleHours = Math.max(0, availableLoad - regularWork);
+  return {
+    availableLoad: Math.round(availableLoad * 2) / 2,
+    idleHours: Math.round(idleHours * 2) / 2,
+    overtimePeople,
+    overtimePersonHours: Math.round(otWork * 2) / 2,
+  };
+}
 
 export function computeReallocation(
   groupsInput: ReallocGroupInput[],
@@ -118,7 +165,9 @@ export function computeReallocation(
 
   const maxTime = startTime + MAX_WORKTIME;
   const totalLoad = gs.reduce((s, g) => s + g.loadHours, 0);
-  const totalPeople = gs.reduce((s, g) => s + g.initialHeadcount, 0);
+  const extraFreeCount = extraFree.reduce((s, e) => s + e.count, 0);
+  const totalPeople =
+    gs.reduce((s, g) => s + g.initialHeadcount, 0) + extraFreeCount;
 
   const freePool: { origin: string }[] = [];
   let time = startTime;
@@ -186,6 +235,7 @@ export function computeReallocation(
     );
     const overtimeHours0 = Math.max(0, actualEnd0 - standardEnd);
     const totalCarry0 = gs.reduce((s, g) => s + Math.max(0, g.remaining), 0);
+    const m0 = computeMetrics(gs, startTime, standardHours, maxTime, totalPeople);
     return {
       startTime,
       standardEnd,
@@ -204,7 +254,8 @@ export function computeReallocation(
       })),
       totalLoad,
       totalPeople,
-      totalCarry: totalCarry0,
+      totalCarry: round30(totalCarry0),
+      ...m0,
     };
   }
 
@@ -335,6 +386,7 @@ export function computeReallocation(
   );
   const overtimeHours = Math.max(0, actualEnd - standardEnd);
   const totalCarry = gs.reduce((s, g) => s + Math.max(0, g.remaining), 0);
+  const m = computeMetrics(gs, startTime, standardHours, maxTime, totalPeople);
 
   return {
     startTime,
@@ -354,7 +406,8 @@ export function computeReallocation(
     })),
     totalLoad,
     totalPeople,
-    totalCarry,
+    totalCarry: round30(totalCarry),
+    ...m,
   };
 }
 
