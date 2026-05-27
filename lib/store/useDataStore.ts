@@ -36,6 +36,8 @@ interface DataState {
   companyChosen: boolean;
   // 관리자 비밀번호 통과 여부 (세션 단위, 새로고침 시 초기화)
   isAdmin: boolean;
+  // sessionStorage 복원 완료 여부 (복원 전 selector flash 방지용)
+  sessionReady: boolean;
 
   // 기준자료
   employees: Employee[];
@@ -85,6 +87,7 @@ interface DataState {
   setSelectedCompany: (company: Company) => void;
   setCompanyChosen: (chosen: boolean) => void;
   setIsAdmin: (b: boolean) => void;
+  setSessionReady: (b: boolean) => void;
   setEmployees: (data: Employee[], meta: UploadMeta) => void;
   setEquipment: (data: Equipment[], meta: UploadMeta) => void;
   setLoadBar: (data: LoadBarInfo[], meta: UploadMeta) => void;
@@ -156,6 +159,7 @@ export const useDataStore = create<DataState>()(
       selectedCompany: "전체" as Company,
       companyChosen: false,
       isAdmin: false,
+      sessionReady: false,
       employees: [],
       equipment: [],
       workGroups: DEFAULT_WORK_GROUPS,
@@ -192,6 +196,7 @@ export const useDataStore = create<DataState>()(
       setSelectedCompany: (company) => set({ selectedCompany: company }),
       setCompanyChosen: (chosen) => set({ companyChosen: chosen }),
       setIsAdmin: (b) => set({ isAdmin: b }),
+      setSessionReady: (b) => set({ sessionReady: b }),
       setEmployees: (data, meta) => set({ employees: data, workStandardMeta: meta }),
       setEquipment: (data, meta) => set({ equipment: data, equipmentMeta: meta }),
       setLoadBar: (data, meta) => set({ loadBar: data, loadBarMeta: meta }),
@@ -461,17 +466,20 @@ export const useDataStore = create<DataState>()(
     {
       name: "woosung-dashboard-store",
       version: 1,
-      // companyChosen / isAdmin 은 persist 제외:
-      // - companyChosen: 페이지 진입(새로고침/새탭)마다 선택화면부터 시작
-      // - isAdmin: sessionStorage 로 탭 단위 관리 (AdminSession)
+      // companyChosen / isAdmin / sessionReady 는 localStorage persist 제외.
+      // 대신 SessionState 컴포넌트가 sessionStorage 로 탭 단위 관리:
+      // - 새 탭/창: 선택화면부터
+      // - 같은 탭 내 페이지 이동(풀 리로드 포함): 선택 상태 유지
       partialize: (state) => {
         const {
           companyChosen: _companyChosen,
           isAdmin: _isAdmin,
+          sessionReady: _sessionReady,
           ...rest
         } = state;
         void _companyChosen;
         void _isAdmin;
+        void _sessionReady;
         return rest;
       },
     }

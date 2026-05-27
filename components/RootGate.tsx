@@ -12,8 +12,10 @@ import { DailyUploadAlert } from "@/components/DailyUploadAlert";
 export function RootGate({ children }: { children: React.ReactNode }) {
   const hydrated = useHydrated();
   const chosen = useDataStore((s) => s.companyChosen);
+  const sessionReady = useDataStore((s) => s.sessionReady);
 
-  if (!hydrated) return null;
+  // sessionStorage 복원 전에는 아무것도 안 그림 (selector flash 방지)
+  if (!hydrated || !sessionReady) return null;
 
   if (!chosen) return <LandingSelector />;
 

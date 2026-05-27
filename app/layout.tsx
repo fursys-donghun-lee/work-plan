@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import "./globals.css";
 import { SyncProvider } from "@/components/SyncProvider";
 import { RootGate } from "@/components/RootGate";
-import { AdminSession } from "@/components/AdminSession";
+import { SessionState } from "@/components/SessionState";
 import { HistoryGuard } from "@/components/HistoryGuard";
 
 export const metadata: Metadata = {
@@ -20,7 +20,7 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body className="min-h-screen">
-        <AdminSession />
+        <SessionState />
         <HistoryGuard />
         <SyncProvider>
           <RootGate>{children}</RootGate>
