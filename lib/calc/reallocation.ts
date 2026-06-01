@@ -31,6 +31,16 @@ const URGENT_MIN_HEADCOUNT = 2;
 const MAX_HEADCOUNT = 2;
 // 새 라인 배치 최소 작업시간(h) — 이 시간 미만이면 이동 안 함
 const MIN_WORK_TO_MOVE = 1;
+// 1인 작업 효율 (짝이 아니라 혼자 일하면 시간당 처리량 60%)
+const SOLO_EFFICIENCY = 0.6;
+
+// 라인 진행률(인시/시간): 자동=인원, 비자동 1명=0.6, 비자동 2명=2.0, 0명=0
+function lineRate(headcount: number, autoManaged: boolean): number {
+  if (headcount <= 0) return 0;
+  if (autoManaged) return headcount;
+  if (headcount === 1) return SOLO_EFFICIENCY;
+  return headcount; // 2명 짝
+}
 
 export interface ReallocMove {
   time: number; // decimal hours
@@ -90,7 +100,7 @@ const EPS = 1e-6;
 //     - 잔업 투입된 인원이 21:00 전에 끝나면 남는 시간도 유휴로 봄
 // · 잔업인원 = 잔업 작업시간이 2h 이상인 라인의 인원만 (그 미만은 0)
 function computeMetrics(
-  groups: { segments: ReallocSegment[] }[],
+  groups: { segments: ReallocSegment[]; autoManaged: boolean }[],
   startTime: number,
   standardHours: number,
   maxTime: number,
@@ -105,30 +115,31 @@ function computeMetrics(
   overtimePersonHours: number;
 } {
   const otStart = startTime + standardHours;
-  let regularWork = 0; // 정규시간 내 실제 투입 인시 (1명 포함)
-  let otWork = 0; // 잔업 작업 인시 (전체)
+  let regularWork = 0; // 정규시간 내 처리 부하(인시) — 1인 60% 효율 반영
+  let otWork = 0; // 잔업 처리 부하(인시) — 1인 60% 효율 반영
   let overtimePeople = 0; // 잔업인원 (라인 잔업 2h 이상만)
   let otPeople = 0; // 잔업 진입 인원 (work-time 8 경계를 넘긴 인원)
-  let otOperationEnd = otStart; // 마지막 잔업 작업 종료(work-time) = 잔업 종료시각
+  let otOperationEnd = otStart; // 마지막 잔업 작업 종료(work-time)
   for (const g of groups) {
-    let maxOtHc = 0; // 이 라인 잔업 최대 인원
-    let otEndLine = otStart; // 이 라인 잔업 작업 마지막 종료(work-time)
+    let maxOtHc = 0;
+    let otEndLine = otStart;
     for (const seg of g.segments) {
       const h = seg.base + seg.added;
-      // 정규시간 내 투입 인시
+      const r = lineRate(h, g.autoManaged); // 1인 60% 등 효율 반영
+      // 정규시간 내 처리 부하
       const hi = Math.min(seg.end, otStart);
       const lo = Math.max(seg.start, startTime);
-      if (hi > lo) regularWork += (hi - lo) * h;
-      // 잔업 작업 인시
+      if (hi > lo) regularWork += (hi - lo) * r;
+      // 잔업 처리 부하
       const otHi = Math.min(seg.end, maxTime);
       const otLo = Math.max(seg.start, otStart);
       if (otHi > otLo) {
-        otWork += (otHi - otLo) * h;
+        otWork += (otHi - otLo) * r;
         maxOtHc = Math.max(maxOtHc, h);
         otEndLine = Math.max(otEndLine, otHi);
         otOperationEnd = Math.max(otOperationEnd, otHi);
       }
-      // 잔업 진입 인원: work-time 8 경계를 지나는 세그먼트의 인원 (각 1회만)
+      // 잔업 진입 인원: work-time 8 경계를 지나는 세그먼트의 인원수
       if (seg.start <= otStart + EPS && seg.end > otStart + EPS) {
         otPeople += h;
       }
@@ -229,6 +240,7 @@ export function computeReallocation(
   };
 
   // 단일 라인 정적 배치 (이동 없음) — 완료시각·세그먼트·이월 산출
+  //  · 1인 작업은 효율 60% 적용
   //  · 잔업 작업시간이 OT_SKIP_THRESHOLD 이하이면 잔업 생략 → 정규까지만 하고 이월
   const placeStatic = (g: G, head: number) => {
     if (g.loadHours <= EPS || head <= 0) {
@@ -236,7 +248,8 @@ export function computeReallocation(
       g.remaining = 0;
       return;
     }
-    const wt = round30(g.loadHours / head); // 완료까지 work-time
+    const r = lineRate(head, g.autoManaged); // 시간당 부하 처리량
+    const wt = round30(g.loadHours / r); // 완료까지 work-time
     if (wt <= standardHours + EPS) {
       // 정규시간 내 완료
       g.segments.push({ start: startTime, end: startTime + wt, base: head, added: 0 });
@@ -251,7 +264,7 @@ export function computeReallocation(
         added: 0,
       });
       g.finishTime = null;
-      g.remaining = g.loadHours - head * standardHours;
+      g.remaining = g.loadHours - r * standardHours;
     } else {
       // 잔업 진행, 21:00(maxTime)까지
       const endWt = Math.min(startTime + wt, maxTime);
@@ -261,7 +274,7 @@ export function computeReallocation(
         g.remaining = 0;
       } else {
         g.finishTime = null;
-        g.remaining = g.loadHours - head * (maxTime - startTime);
+        g.remaining = g.loadHours - r * (maxTime - startTime);
       }
     }
   };
@@ -338,9 +351,13 @@ export function computeReallocation(
   }
 
   const rawMoves: ReallocMove[] = [];
+  const projectedFinish = (g: G) => {
+    const r = lineRate(hc(g), g.autoManaged);
+    return r > 0 ? g.remaining / r : Infinity;
+  };
   const bottleneck = (a: G, b: G) => {
-    const fa = hc(a) > 0 ? a.remaining / hc(a) : Infinity;
-    const fb = hc(b) > 0 ? b.remaining / hc(b) : Infinity;
+    const fa = projectedFinish(a);
+    const fb = projectedFinish(b);
     if (Math.abs(fa - fb) > EPS) return fb - fa;
     if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
     return 0;
@@ -395,7 +412,8 @@ export function computeReallocation(
         if (g.autoManaged || g.dropped) return false;
         if (g.remaining <= EPS) return false;
         if (hc(g) >= g.otTarget) return false; // 라인별 허용 인원(최대 2명 짝)까지만
-        const projected = g.remaining / (hc(g) + 1);
+        // 인원 1명 늘렸을 때 처리율 반영해 예상 소요 산출 (1인=0.6, 2인=2.0)
+        const projected = g.remaining / lineRate(hc(g) + 1, g.autoManaged);
         return Math.min(projected, remToMax) >= MIN_WORK_TO_MOVE - EPS;
       });
       if (candidates.length === 0) break;
@@ -436,7 +454,8 @@ export function computeReallocation(
     );
     if (active.length === 0) break;
     const dt = Math.min(STEP, maxTime - time);
-    for (const g of active) g.remaining -= hc(g) * dt;
+    // 1인 작업은 60% 효율, 2명 짝은 100% per-person
+    for (const g of active) g.remaining -= lineRate(hc(g), g.autoManaged) * dt;
     time += dt;
 
     // 완료 그룹 → 인원 여유 풀로
