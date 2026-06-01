@@ -64,6 +64,7 @@ export interface ReallocGroupTimeline {
   finishTime: number | null; // 부하 없으면 null, 이월이면 null
   carryHours: number; // 21:00까지 못 끝낸 이월 부하(인시)
   urgent: boolean;
+  autoManaged: boolean; // 자동포장라인 여부 (팀 타임라인 lane 분리용)
 }
 
 // 30분 단위 반올림
@@ -314,6 +315,7 @@ export function computeReallocation(
         finishTime: g.remaining > EPS ? null : g.finishTime,
         carryHours: round30(Math.max(0, g.remaining)),
         urgent: g.urgent,
+        autoManaged: g.autoManaged,
       })),
       totalLoad,
       totalPeople,
@@ -523,6 +525,7 @@ export function computeReallocation(
       finishTime: g.remaining > EPS ? null : g.finishTime,
       carryHours: round30(Math.max(0, g.remaining)),
       urgent: g.urgent,
+      autoManaged: g.autoManaged,
     })),
     totalLoad,
     totalPeople,

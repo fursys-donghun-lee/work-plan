@@ -7,6 +7,7 @@ import { useDataStore } from "@/lib/store/useDataStore";
 import { useHydrated } from "@/components/useComputed";
 import { EmptyState } from "@/components/EmptyState";
 import { ReallocationPlan } from "@/components/ReallocationPlan";
+import { TeamTimeline } from "@/components/TeamTimeline";
 import { useDaerimRealloc } from "@/components/useDaerimRealloc";
 import {
   computeReallocation,
@@ -72,21 +73,21 @@ export function DaerimPlanView() {
       {/* 재배치 개선 효과 (기본 배치 → 재배치) */}
       <ImprovementSummary rBasic={rBasic} rReal={rReal} />
 
-      {/* 1) 기본 배치 (이동 없음) */}
+      {/* 메인 view — 팀 타임라인 (한눈에 인원 운용) */}
+      <TeamTimeline result={rReal} title="② 재배치 로직 — 팀 타임라인" />
+      <TeamTimeline result={rBasic} title="① 기본 배치 — 팀 타임라인" />
+
+      {/* 보조 view — 라인 기준 간트 (부하 진행률 확인용) */}
       <ReallocationPlan
         groups={groups}
         extraFree={extraFree}
         disableRealloc
-        title="① 기본 배치 (인원 이동 없음)"
-        defaultOpen
+        title="① 기본 배치 (라인 기준 간트)"
       />
-
-      {/* 2) 재배치 로직 */}
       <ReallocationPlan
         groups={groups}
         extraFree={extraFree}
-        title="② 재배치 로직 적용 (잔업 최소화)"
-        defaultOpen
+        title="② 재배치 로직 (라인 기준 간트)"
       />
     </div>
   );
