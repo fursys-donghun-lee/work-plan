@@ -222,7 +222,6 @@ export function ReallocationPlan({
               <div className="w-14 flex-shrink-0" />
             </div>
 
-            <div className="relative">
             <div className="space-y-1.5">
               {result.timelines
                 .filter((t) => t.loadHours > 0.01)
@@ -327,6 +326,58 @@ export function ReallocationPlan({
                           </div>
                         ));
                       })}
+                      {/* 인원 이동 라벨 — 출발 라인 행, 이동 시각에 '→ 도착라인 N명' 표시 */}
+                      {!disableRealloc &&
+                        (() => {
+                          const outs = result.moves.filter(
+                            (m) => m.from === t.name
+                          );
+                          if (outs.length === 0) return null;
+                          const byTime = new Map<
+                            number,
+                            { to: string; count: number }[]
+                          >();
+                          for (const m of outs) {
+                            const arr = byTime.get(m.time) ?? [];
+                            arr.push({ to: m.to, count: m.count });
+                            byTime.set(m.time, arr);
+                          }
+                          return Array.from(byTime.entries()).map(
+                            ([time, ms]) => {
+                              const xPct = pct(workTimeToWall(time));
+                              const total = ms.reduce(
+                                (s, m) => s + m.count,
+                                0
+                              );
+                              return (
+                                <div
+                                  key={`out-${time}`}
+                                  className="absolute top-1/2 -translate-y-1/2 pointer-events-none flex items-center gap-1 z-10"
+                                  style={{ left: `${xPct}%`, paddingLeft: 4 }}
+                                  title={`${formatHM(workTimeToWall(time))} · ${t.name} → ${ms.map((m) => `${m.to}(${m.count})`).join(", ")}`}
+                                >
+                                  <span className="text-orange-600 text-base font-black leading-none drop-shadow-sm">
+                                    ⇨
+                                  </span>
+                                  <div className="flex flex-col gap-0.5">
+                                    {ms.map((m, i) => (
+                                      <span
+                                        key={i}
+                                        className="text-[11px] font-bold leading-none px-1.5 py-0.5 rounded bg-orange-500 text-white shadow whitespace-nowrap"
+                                      >
+                                        {m.to} {m.count}명
+                                      </span>
+                                    ))}
+                                  </div>
+                                  {/* 총 이동 인원 (한 번의 이동에 다수면 좌측 굵은 카운트로 강조) */}
+                                  {ms.length > 1 && (
+                                    <span className="sr-only">총 {total}명</span>
+                                  )}
+                                </div>
+                              );
+                            }
+                          );
+                        })()}
                     </div>
                     <div className="w-14 flex-shrink-0 text-xs text-right">
                       {t.finishTime !== null ? (
@@ -345,76 +396,6 @@ export function ReallocationPlan({
                   </div>
                 ))}
             </div>
-            {/* 인원 이동 화살표 오버레이 (재배치 모드에서만) */}
-            {!disableRealloc && result.moves.length > 0 && (() => {
-              const filtered = result.timelines.filter((t) => t.loadHours > 0.01);
-              const idxOf = new Map<string, number>();
-              filtered.forEach((t, i) => idxOf.set(t.name, i));
-              const ROW_H = 40; // h-10
-              const ROW_GAP = 6; // space-y-1.5
-              const yCenter = (i: number) => i * (ROW_H + ROW_GAP) + ROW_H / 2;
-              return (
-                <svg
-                  className="absolute pointer-events-none"
-                  style={{
-                    top: 0,
-                    bottom: 0,
-                    left: "7.5rem", // w-28(=7rem) + gap-2(=0.5rem)
-                    right: "4rem", // w-14(=3.5rem) + gap-2(=0.5rem)
-                    overflow: "visible",
-                  }}
-                >
-                  <defs>
-                    <marker
-                      id="moveArrowHead"
-                      markerWidth="10"
-                      markerHeight="10"
-                      refX="8"
-                      refY="3"
-                      orient="auto"
-                      markerUnits="userSpaceOnUse"
-                    >
-                      <polygon points="0,0 0,6 9,3" fill="#ea580c" />
-                    </marker>
-                  </defs>
-                  {result.moves.map((m, mi) => {
-                    const fi = idxOf.get(m.from);
-                    const ti = idxOf.get(m.to);
-                    if (fi === undefined || ti === undefined || fi === ti) return null;
-                    const xPct = pct(workTimeToWall(m.time));
-                    const dir = ti > fi ? 1 : -1;
-                    const y1 = yCenter(fi) + dir * (ROW_H / 2 - 2); // 출발 행 가장자리부터
-                    const y2 = yCenter(ti) - dir * (ROW_H / 2 - 2); // 도착 행 가장자리까지
-                    return (
-                      <g key={mi}>
-                        <line
-                          x1={`${xPct}%`}
-                          y1={y1}
-                          x2={`${xPct}%`}
-                          y2={y2}
-                          stroke="#ea580c"
-                          strokeWidth={2.5}
-                          strokeOpacity={0.85}
-                          markerEnd="url(#moveArrowHead)"
-                        />
-                        <text
-                          x={`${xPct}%`}
-                          y={(y1 + y2) / 2}
-                          dx={6}
-                          dy={3}
-                          fontSize={11}
-                          fontWeight={700}
-                          fill="#9a3412"
-                        >
-                          {m.count}명
-                        </text>
-                      </g>
-                    );
-                  })}
-                </svg>
-              );
-            })()}
-            </div>
             <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-400 flex-wrap">
               <span className="inline-flex items-center gap-1">
                 <span className="w-3 h-3 rounded bg-blue-500 inline-block" />
@@ -430,8 +411,15 @@ export function ReallocationPlan({
               </span>
               {!disableRealloc && (
                 <span className="inline-flex items-center gap-1">
-                  <ArrowRight className="w-3 h-3 text-slate-300" />
-                  인원 이동(재배치)
+                  <span className="text-orange-600 text-base font-black leading-none">
+                    ⇨
+                  </span>
+                  <span className="text-[10px] font-bold leading-none px-1.5 py-0.5 rounded bg-orange-500 text-white">
+                    이동
+                  </span>
+                  <span className="text-slate-500">
+                    = 이동 시각 · 출발 라인 → 도착 라인 N명
+                  </span>
                 </span>
               )}
               <span className="inline-flex items-center gap-1">
