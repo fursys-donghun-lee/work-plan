@@ -222,6 +222,7 @@ export function ReallocationPlan({
               <div className="w-14 flex-shrink-0" />
             </div>
 
+            <div className="relative">
             <div className="space-y-1.5">
               {result.timelines
                 .filter((t) => t.loadHours > 0.01)
@@ -235,7 +236,7 @@ export function ReallocationPlan({
                       )}
                       {t.name}
                     </div>
-                    <div className="flex-1 relative h-6 bg-slate-50 rounded overflow-hidden">
+                    <div className="flex-1 relative h-10 bg-slate-50 rounded overflow-hidden">
                       {/* 휴게 음영 + 블록 경계선 (배경) */}
                       {trackBackground}
                       {/* 유휴(노는 시간) — 사람이 투입되지 않은 구간을 연한 빨강으로
@@ -311,7 +312,7 @@ export function ReallocationPlan({
                           <div
                             key={`${si}-${wi}`}
                             className={cn(
-                              "absolute top-0 bottom-0 rounded flex items-center justify-center text-[10px] font-semibold",
+                              "absolute top-0 bottom-0 rounded flex items-center justify-center text-xs font-bold",
                               seg.added > 0
                                 ? "bg-yellow-100 text-slate-800 border border-yellow-300"
                                 : "bg-blue-500 text-white"
@@ -327,7 +328,7 @@ export function ReallocationPlan({
                         ));
                       })}
                     </div>
-                    <div className="w-14 flex-shrink-0 text-[11px] text-right">
+                    <div className="w-14 flex-shrink-0 text-xs text-right">
                       {t.finishTime !== null ? (
                         <span className="text-slate-500">
                           {formatHM(workTimeToWall(t.finishTime))}
@@ -343,6 +344,76 @@ export function ReallocationPlan({
                     </div>
                   </div>
                 ))}
+            </div>
+            {/* 인원 이동 화살표 오버레이 (재배치 모드에서만) */}
+            {!disableRealloc && result.moves.length > 0 && (() => {
+              const filtered = result.timelines.filter((t) => t.loadHours > 0.01);
+              const idxOf = new Map<string, number>();
+              filtered.forEach((t, i) => idxOf.set(t.name, i));
+              const ROW_H = 40; // h-10
+              const ROW_GAP = 6; // space-y-1.5
+              const yCenter = (i: number) => i * (ROW_H + ROW_GAP) + ROW_H / 2;
+              return (
+                <svg
+                  className="absolute pointer-events-none"
+                  style={{
+                    top: 0,
+                    bottom: 0,
+                    left: "7.5rem", // w-28(=7rem) + gap-2(=0.5rem)
+                    right: "4rem", // w-14(=3.5rem) + gap-2(=0.5rem)
+                    overflow: "visible",
+                  }}
+                >
+                  <defs>
+                    <marker
+                      id="moveArrowHead"
+                      markerWidth="10"
+                      markerHeight="10"
+                      refX="8"
+                      refY="3"
+                      orient="auto"
+                      markerUnits="userSpaceOnUse"
+                    >
+                      <polygon points="0,0 0,6 9,3" fill="#ea580c" />
+                    </marker>
+                  </defs>
+                  {result.moves.map((m, mi) => {
+                    const fi = idxOf.get(m.from);
+                    const ti = idxOf.get(m.to);
+                    if (fi === undefined || ti === undefined || fi === ti) return null;
+                    const xPct = pct(workTimeToWall(m.time));
+                    const dir = ti > fi ? 1 : -1;
+                    const y1 = yCenter(fi) + dir * (ROW_H / 2 - 2); // 출발 행 가장자리부터
+                    const y2 = yCenter(ti) - dir * (ROW_H / 2 - 2); // 도착 행 가장자리까지
+                    return (
+                      <g key={mi}>
+                        <line
+                          x1={`${xPct}%`}
+                          y1={y1}
+                          x2={`${xPct}%`}
+                          y2={y2}
+                          stroke="#ea580c"
+                          strokeWidth={2.5}
+                          strokeOpacity={0.85}
+                          markerEnd="url(#moveArrowHead)"
+                        />
+                        <text
+                          x={`${xPct}%`}
+                          y={(y1 + y2) / 2}
+                          dx={6}
+                          dy={3}
+                          fontSize={11}
+                          fontWeight={700}
+                          fill="#9a3412"
+                        >
+                          {m.count}명
+                        </text>
+                      </g>
+                    );
+                  })}
+                </svg>
+              );
+            })()}
             </div>
             <div className="flex items-center gap-3 mt-2 text-[10px] text-slate-400 flex-wrap">
               <span className="inline-flex items-center gap-1">
