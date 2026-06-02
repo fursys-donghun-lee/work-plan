@@ -11,12 +11,14 @@ import {
   type ReallocResult,
 } from "@/lib/calc/reallocation";
 import { X } from "lucide-react";
+import type { TempCell } from "@/components/TempCellEditor";
 
 interface Props {
   result: ReallocResult;
   lineWorkers: Record<string, string[]>;
   overrides: Record<string, string>;
   setOverrides: (next: Record<string, string>) => void;
+  tempCells?: TempCell[];
 }
 
 // 이름 지정 간트 — 막대에 작업자 이름 표시, '이동시킬 것' 라벨 클릭으로 누가 갈지 결정
@@ -25,6 +27,7 @@ export function NamedReallocationPlan({
   lineWorkers,
   overrides,
   setOverrides,
+  tempCells = [],
 }: Props) {
   const AXIS_START = 8.5;
   const AXIS_END = 21.0;
@@ -227,8 +230,11 @@ export function NamedReallocationPlan({
       </div>
 
       <div className="space-y-1.5">
-        {result.timelines.map((t) => (
-          <div key={t.name} className="flex items-center gap-2">
+        {result.timelines.map((t) => {
+          const linesTempCells = tempCells.filter((c) => c.parentLine === t.name);
+          return (
+        <div key={t.name}>
+          <div className="flex items-center gap-2">
             <div className="w-28 flex-shrink-0 flex items-center gap-1">
               {t.urgent && (
                 <span
@@ -383,7 +389,78 @@ export function NamedReallocationPlan({
               )}
             </div>
           </div>
-        ))}
+          {/* 임시 셀 행 — 부모 라인 바로 아래 */}
+          {linesTempCells.map((cell, ci) => (
+            <div
+              key={cell.id}
+              className="flex items-center gap-2 mt-1.5"
+            >
+              <div className="w-28 flex-shrink-0 flex items-center gap-1">
+                <div className="min-w-0 flex-1 leading-tight">
+                  <div className="text-xs font-medium text-purple-700 truncate">
+                    {t.name} 임시 #{ci + 1}
+                  </div>
+                  <div className="text-[10px] text-slate-400">
+                    {cell.workerNames.length === 1 ? "1명 60%" : `${cell.workerNames.length}명`}
+                  </div>
+                </div>
+              </div>
+              <div className="flex-1 relative h-12 bg-slate-50 rounded overflow-hidden">
+                {trackBackground}
+                {/* 임시 셀 작업 막대 (보라) */}
+                {(() => {
+                  if (
+                    cell.workerNames.length === 0 ||
+                    cell.endWt <= cell.startWt
+                  )
+                    return null;
+                  return splitWorkSegment(cell.startWt, cell.endWt).map(
+                    (w, wi) => {
+                      const widthPct = Math.max(
+                        pct(w.end) - pct(w.start),
+                        1.5
+                      );
+                      return (
+                        <div
+                          key={`tc-${wi}`}
+                          className="absolute top-0 bottom-0 rounded flex items-center justify-center gap-0.5 px-0.5 overflow-hidden bg-purple-500 border border-purple-600"
+                          style={{
+                            left: `${pct(w.start)}%`,
+                            width: `${widthPct}%`,
+                          }}
+                          title={`${formatHM(w.start)}~${formatHM(w.end)} · ${cell.workerNames.join(", ")}`}
+                        >
+                          {cell.workerNames.map((name) => (
+                            <span
+                              key={name}
+                              className="text-[10px] font-bold leading-none px-1 whitespace-nowrap truncate text-white"
+                            >
+                              {name}
+                            </span>
+                          ))}
+                        </div>
+                      );
+                    }
+                  );
+                })()}
+              </div>
+              <div className="w-24 flex-shrink-0 text-xs text-right leading-tight">
+                <span className="text-purple-700 font-medium whitespace-nowrap">
+                  {(() => {
+                    const dur = Math.max(0, cell.endWt - cell.startWt);
+                    const eff =
+                      cell.workerNames.length === 1
+                        ? dur * 0.6
+                        : cell.workerNames.length * dur;
+                    return `+${eff.toFixed(1)}인시`;
+                  })()}
+                </span>
+              </div>
+            </div>
+          ))}
+        </div>
+          );
+        })}
       </div>
 
       {/* 범례 */}

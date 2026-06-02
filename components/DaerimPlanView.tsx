@@ -9,6 +9,10 @@ import { EmptyState } from "@/components/EmptyState";
 import { ReallocationPlan } from "@/components/ReallocationPlan";
 import { NamedReallocationPlan } from "@/components/NamedReallocationPlan";
 import { WorkerRosterByTime } from "@/components/WorkerRosterByTime";
+import {
+  TempCellEditor,
+  type TempCell,
+} from "@/components/TempCellEditor";
 import { useDaerimRealloc } from "@/components/useDaerimRealloc";
 import {
   computeReallocation,
@@ -27,6 +31,8 @@ export function DaerimPlanView() {
   const [tab, setTab] = useState<"count" | "named">("count");
   // 이름 지정 탭의 이동 override 상태 — 간트 클릭과 패널 드롭다운이 공유
   const [overrides, setOverrides] = useState<Record<string, string>>({});
+  // 임시 셀(보조 작업셀) 상태
+  const [tempCells, setTempCells] = useState<TempCell[]>([]);
 
   // 기본 배치 vs 재배치 결과 → 개선 효과(델타) 계산
   const rBasic = useMemo(
@@ -132,8 +138,17 @@ export function DaerimPlanView() {
             lineWorkers={lineWorkers}
             overrides={overrides}
             setOverrides={setOverrides}
+            tempCells={tempCells}
           />
-          {/* 시간대별 라인 작업자 정리 (드롭다운 없는 깔끔한 정리표) */}
+          {/* 임시 셀 운영 — 이월 부담 라인의 보조 셀 구성 */}
+          <TempCellEditor
+            result={rReal}
+            lineWorkers={lineWorkers}
+            overrides={overrides}
+            tempCells={tempCells}
+            setTempCells={setTempCells}
+          />
+          {/* 시간대별 라인 작업자 정리 */}
           <WorkerRosterByTime
             result={rReal}
             lineWorkers={lineWorkers}
