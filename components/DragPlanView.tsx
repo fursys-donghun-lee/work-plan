@@ -63,26 +63,69 @@ export function DragPlanView({ result, lineWorkers }: Props) {
     return m;
   }, [assignments, lineNames]);
 
-  // 라인별 처리 부하 (인시) 계산
-  const consumed = useMemo(() => {
-    const c: Record<string, number> = {};
-    for (const line of lineNames) {
-      let total = 0;
-      for (let h = 0; h < HOUR_COUNT; h++) {
-        const count = (cellWorkers[line]?.[h] ?? []).length;
-        total += ratePerHour(count);
-      }
-      c[line] = total;
-    }
-    return c;
-  }, [cellWorkers, lineNames]);
-
   // 라인 부하 lookup
   const loadByLine = useMemo(() => {
     const m: Record<string, number> = {};
     for (const t of result.timelines) m[t.name] = t.loadHours;
     return m;
   }, [result.timelines]);
+
+  // 라인별 누적 처리 부하 + 완료 시각 계산
+  const tracking = useMemo(() => {
+    type LineTrack = {
+      byHour: number[]; // 누적 처리 부하 (각 시각 종료 후)
+      completionHour: number | null; // 완료된 시각 (없으면 null)
+      total: number; // 최종 누적
+    };
+    const out: Record<string, LineTrack> = {};
+    for (const line of lineNames) {
+      const load = loadByLine[line] ?? 0;
+      let cum = 0;
+      let completion: number | null = null;
+      const byHour: number[] = [];
+      for (let h = 0; h < HOUR_COUNT; h++) {
+        const cnt = (cellWorkers[line]?.[h] ?? []).length;
+        cum += ratePerHour(cnt);
+        byHour[h] = cum;
+        if (completion === null && load > 0.01 && cum >= load - 0.01) {
+          completion = h;
+        }
+      }
+      out[line] = { byHour, completionHour: completion, total: cum };
+    }
+    return out;
+  }, [cellWorkers, lineNames, loadByLine]);
+
+  // 라인별 부하 영역 — 2명 짝 기준 필요한 셀 수 (배경 표시용)
+  const loadCellCount = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const line of lineNames) {
+      const load = loadByLine[line] ?? 0;
+      m[line] = load > 0.01 ? Math.ceil(load / 2) : 0;
+    }
+    return m;
+  }, [loadByLine, lineNames]);
+
+  // 시각 h 에서 추천 도착 라인 (가장 잔여 부하 큰 라인)
+  const suggestionAt = (atHour: number): string | null => {
+    const candidates = lineNames
+      .filter((l) => (loadByLine[l] ?? 0) > 0.01)
+      .map((l) => {
+        const cum = tracking[l]?.byHour[atHour] ?? 0;
+        const load = loadByLine[l] ?? 0;
+        return { line: l, remaining: load - cum };
+      })
+      .filter((c) => c.remaining > 0.01)
+      .sort((a, b) => b.remaining - a.remaining);
+    return candidates[0]?.line ?? null;
+  };
+
+  // 호환: 기존 consumed 사용처를 위해 별칭
+  const consumed = useMemo(() => {
+    const c: Record<string, number> = {};
+    for (const line of lineNames) c[line] = tracking[line]?.total ?? 0;
+    return c;
+  }, [tracking, lineNames]);
 
   // 드래그 핸들러
   const [dragging, setDragging] = useState<string | null>(null);
@@ -269,15 +312,30 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                       );
                     }
                     const workers = cellWorkers[line]?.[s.wt] ?? [];
+                    const tr = tracking[line];
+                    const lr = loadCellCount[line] ?? 0;
+                    const completion = tr?.completionHour ?? null;
+                    const inLoadRegion = s.wt < lr;
+                    const isComplete = completion === s.wt;
+                    const isExcess =
+                      completion !== null && s.wt > completion && workers.length > 0;
+                    const suggested = isExcess ? suggestionAt(s.wt) : null;
                     return (
                       <td
                         key={`w-${s.wt}`}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, line, s.wt)}
                         className={cn(
-                          "border border-slate-200 p-0.5 align-top h-12",
+                          "border border-slate-200 p-0.5 align-top h-14 relative",
                           s.isFirstOT && "border-l-4 border-l-rose-500",
-                          s.isOT && "bg-rose-50/20"
+                          s.isOT && "bg-rose-50/20",
+                          // 부하 영역 배경 (이 라인의 부하만큼 셀에 옅은 파랑)
+                          inLoadRegion && !isComplete && !isExcess && "bg-blue-50/70",
+                          // 완료 셀
+                          isComplete &&
+                            "border-2 border-emerald-500 bg-emerald-50",
+                          // 완료 후 여유 셀
+                          isExcess && "border-2 border-amber-400 bg-amber-50"
                         )}
                         title={`${formatHM(s.wallStart)}~${formatHM(s.wallEnd)} ${s.isOT ? "(잔업)" : ""}`}
                       >
@@ -302,6 +360,25 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                             </div>
                           ))}
                         </div>
+                        {/* 완료 표시 */}
+                        {isComplete && (
+                          <div className="absolute bottom-0 right-0.5 text-[9px] font-bold text-emerald-700 leading-none">
+                            ✓ 완료
+                          </div>
+                        )}
+                        {/* 여유 인원 + 추천 라인 */}
+                        {isExcess && (
+                          <div className="absolute bottom-0 left-0.5 right-0.5 text-[9px] leading-tight">
+                            <div className="text-amber-700 font-bold">
+                              여유 {workers.length}명
+                            </div>
+                            {suggested && (
+                              <div className="text-blue-700 truncate">
+                                → {suggested}
+                              </div>
+                            )}
+                          </div>
+                        )}
                       </td>
                     );
                   })}
@@ -321,8 +398,20 @@ export function DragPlanView({ result, lineWorkers }: Props) {
           <span className="w-3 h-3 rounded bg-yellow-200 border border-yellow-400 inline-block" />
           솔로(1명·60%)
         </span>
-        <span>· 드래그해서 작업자를 다른 라인·시간 셀로 이동시킬 수 있습니다</span>
-        <span>· 드롭 시 그 시각부터 같은 라인이 이어지는 한 자동 전파</span>
+        <span className="inline-flex items-center gap-1">
+          <span className="w-3 h-3 rounded bg-blue-50/70 border border-slate-300 inline-block" />
+          부하 영역 (작업 필요 시간)
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="w-3 h-3 rounded bg-emerald-50 border-2 border-emerald-500 inline-block" />
+          완료 ✓
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="w-3 h-3 rounded bg-amber-50 border-2 border-amber-400 inline-block" />
+          여유 (인원이동 가이드 표시)
+        </span>
+        <span className="w-full" />
+        <span>· 드래그로 작업자 이동 · 드롭 시 그 시각부터 같은 라인이 이어지는 한 자동 전파</span>
       </div>
     </div>
   );
