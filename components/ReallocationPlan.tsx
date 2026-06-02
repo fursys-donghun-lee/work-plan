@@ -228,19 +228,31 @@ export function ReallocationPlan({
                   </span>
                 ))}
               </div>
-              <div className="w-14 flex-shrink-0" />
+              <div className="w-24 flex-shrink-0" />
             </div>
 
             <div className="space-y-1.5">
               {result.timelines.map((t) => (
                   <div key={t.name} className="flex items-center gap-2">
-                    <div className="w-28 flex-shrink-0 text-xs font-medium text-slate-700 truncate flex items-center gap-1">
+                    <div className="w-28 flex-shrink-0 flex items-center gap-1">
                       {t.urgent && (
-                        <span className="text-rose-600" title="긴급건 라인">
+                        <span
+                          className="text-rose-600 text-base leading-none flex-shrink-0"
+                          title="긴급건 라인"
+                        >
                           ●
                         </span>
                       )}
-                      {t.name}
+                      <div className="min-w-0 flex-1 leading-tight">
+                        <div className="text-xs font-medium text-slate-700 truncate">
+                          {t.name}
+                        </div>
+                        {t.loadHours > 0.01 && (
+                          <div className="text-[10px] text-slate-400">
+                            {t.loadHours.toFixed(1)}인시
+                          </div>
+                        )}
+                      </div>
                     </div>
                     <div className="flex-1 relative h-10 bg-slate-50 rounded overflow-hidden">
                       {/* 휴게 음영 + 블록 경계선 (배경) */}
@@ -387,7 +399,7 @@ export function ReallocationPlan({
                           );
                         })()}
                     </div>
-                    <div className="w-14 flex-shrink-0 text-xs text-right">
+                    <div className="w-24 flex-shrink-0 text-xs text-right leading-tight">
                       {t.loadHours <= 0.01 ? (
                         <span className="text-slate-300" title="부하 없음">
                           —
@@ -398,10 +410,10 @@ export function ReallocationPlan({
                         </span>
                       ) : (
                         <span
-                          className="text-amber-700 font-medium"
+                          className="text-amber-700 font-medium whitespace-nowrap"
                           title={`${t.carryHours.toFixed(1)}인시 이월`}
                         >
-                          이월
+                          {t.carryHours.toFixed(1)}인시 이월
                         </span>
                       )}
                     </div>

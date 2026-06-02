@@ -72,11 +72,20 @@ export function DaerimPlanView() {
       {/* 재배치 개선 효과 (기본 배치 → 재배치) */}
       <ImprovementSummary rBasic={rBasic} rReal={rReal} />
 
-      {/* 재배치 로직 — 메인 간트 (인원 이동 화살표 포함) */}
+      {/* ① 기본 배치 (재배치 없음) */}
       <ReallocationPlan
         groups={groups}
         extraFree={extraFree}
-        title="재배치 로직 적용 (인원 이동 화살표 포함)"
+        disableRealloc
+        title="① 기본 배치 (인원 이동 없음)"
+        defaultOpen
+      />
+
+      {/* ② 재배치 로직 — 인원 이동 라벨 포함 */}
+      <ReallocationPlan
+        groups={groups}
+        extraFree={extraFree}
+        title="② 재배치 로직 적용 (인원 이동 표시)"
         defaultOpen
       />
     </div>
