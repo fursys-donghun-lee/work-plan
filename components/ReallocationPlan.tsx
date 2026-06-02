@@ -46,6 +46,25 @@ export function ReallocationPlan({
       ? (result.workHours / result.availableLoad) * 100
       : 0;
 
+  // 잔업 라인 수 / 가동 라인 수 (잔업 작업시간 ≥2h인 라인만 잔업으로 카운트)
+  const otStartWt = STANDARD_WORKTIME;
+  const otEndWt = MAX_WORKTIME;
+  const activeLineCount = result.timelines.filter((t) => t.loadHours > 0.01).length;
+  const otLineCount = result.timelines.filter((t) => {
+    let maxOtHc = 0;
+    let otEndLine = otStartWt;
+    for (const seg of t.segments) {
+      const h = seg.base + seg.added;
+      const hi = Math.min(seg.end, otEndWt);
+      const lo = Math.max(seg.start, otStartWt);
+      if (hi > lo && h > 0) {
+        maxOtHc = Math.max(maxOtHc, h);
+        otEndLine = Math.max(otEndLine, hi);
+      }
+    }
+    return maxOtHc > 0 && otEndLine - otStartWt >= 2 - 1e-6;
+  }).length;
+
   // 간트 축: 하루 전체 고정 (08:30 ~ 21:00) — 블록 그리드 일관성
   const AXIS_START = 8.5;
   const AXIS_END = 21.0;
@@ -108,7 +127,7 @@ export function ReallocationPlan({
       {open && (
         <div className="mt-4 space-y-5">
           {/* 요약 지표 */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2">
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2">
             {(
               [
               {
@@ -117,14 +136,9 @@ export function ReallocationPlan({
                 tone: "slate" as const,
               },
               {
-                label: "가용부하",
-                value: `${result.availableLoad.toFixed(1)}인시`,
-                tone: "blue" as const,
-              },
-              {
-                label: "작업시간",
-                value: `${result.workHours.toFixed(1)}인시`,
-                tone: "blue" as const,
+                label: "인력 가동률",
+                value: `${utilization.toFixed(0)}%`,
+                tone: "emerald" as const,
               },
               {
                 label: "유휴시간",
@@ -133,25 +147,20 @@ export function ReallocationPlan({
                 hint: `정규 유휴 ${result.regularIdleHours.toFixed(1)}인시 + 잔업 유휴 ${result.overtimeIdleHours.toFixed(1)}인시`,
               },
               {
-                label: "인력 가동률",
-                value: `${utilization.toFixed(0)}%`,
-                tone: "emerald" as const,
-              },
-              {
-                label: "이월시간",
-                value: `${result.totalCarry.toFixed(1)}인시`,
-                tone: result.totalCarry > 0.01 ? ("amber" as const) : ("slate" as const),
-              },
-              {
                 label: "잔업인원",
                 value: `${result.overtimePeople}명`,
                 tone: result.overtimePeople > 0 ? ("rose" as const) : ("slate" as const),
               },
               {
-                label: "잔업시간",
-                value: `${result.overtimePersonHours.toFixed(1)}인시`,
-                tone:
-                  result.overtimePersonHours > 0.01 ? ("rose" as const) : ("slate" as const),
+                label: "잔업 라인",
+                value: `${otLineCount} / ${activeLineCount}`,
+                tone: otLineCount > 0 ? ("rose" as const) : ("slate" as const),
+                hint: `잔업 작업시간 2h 이상 라인 ${otLineCount}개 / 전체 가동 라인 ${activeLineCount}개`,
+              },
+              {
+                label: "이월시간",
+                value: `${result.totalCarry.toFixed(1)}인시`,
+                tone: result.totalCarry > 0.01 ? ("amber" as const) : ("slate" as const),
               },
             ] as {
               label: string;
