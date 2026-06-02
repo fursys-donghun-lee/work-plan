@@ -7,8 +7,8 @@ import { useDataStore } from "@/lib/store/useDataStore";
 import { useHydrated } from "@/components/useComputed";
 import { EmptyState } from "@/components/EmptyState";
 import { ReallocationPlan } from "@/components/ReallocationPlan";
-import { NamedMovesPanel } from "@/components/NamedMovesPanel";
 import { NamedReallocationPlan } from "@/components/NamedReallocationPlan";
+import { WorkerRosterByTime } from "@/components/WorkerRosterByTime";
 import { useDaerimRealloc } from "@/components/useDaerimRealloc";
 import {
   computeReallocation,
@@ -126,18 +126,18 @@ export function DaerimPlanView() {
         </>
       ) : (
         <>
-          {/* 이름 지정 view — 작업자명이 보이는 간트 + 클릭 이동 명령 */}
+          {/* 이름 지정 view — 작업자명이 보이는 간트 + 주황 라벨 클릭으로 이동 지정 */}
           <NamedReallocationPlan
             result={rReal}
             lineWorkers={lineWorkers}
             overrides={overrides}
             setOverrides={setOverrides}
           />
-          <NamedMovesPanel
+          {/* 시간대별 라인 작업자 정리 (드롭다운 없는 깔끔한 정리표) */}
+          <WorkerRosterByTime
             result={rReal}
             lineWorkers={lineWorkers}
             overrides={overrides}
-            setOverrides={setOverrides}
           />
         </>
       )}

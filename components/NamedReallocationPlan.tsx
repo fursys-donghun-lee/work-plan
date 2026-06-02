@@ -19,14 +19,13 @@ interface Props {
   setOverrides: (next: Record<string, string>) => void;
 }
 
-// 이름 지정 간트 — 막대 안에 작업자 이름이 보이고, 이름을 클릭해 이동 명령
+// 이름 지정 간트 — 막대에 작업자 이름 표시, '이동시킬 것' 라벨 클릭으로 누가 갈지 결정
 export function NamedReallocationPlan({
   result,
   lineWorkers,
   overrides,
   setOverrides,
 }: Props) {
-  // 간트 축
   const AXIS_START = 8.5;
   const AXIS_END = 21.0;
   const span = AXIS_END - AXIS_START;
@@ -41,7 +40,7 @@ export function NamedReallocationPlan({
     { start: 17.5, end: 18.0 },
   ];
 
-  // 이동 정렬 (NamedMovesPanel과 동일하게)
+  // 이동 일관 정렬 (NamedMovesPanel/WorkerRoster와 동일)
   const sortedMoves = useMemo(
     () =>
       [...result.moves].sort(
@@ -50,23 +49,19 @@ export function NamedReallocationPlan({
     [result.moves]
   );
 
-  // 시뮬레이션 + override 를 시간순으로 재생하며 라인별 작업자 스냅샷 계산
+  // 시간순 작업자 스냅샷 (라인 → [{time, workers}])
   const snapshots = useMemo(() => {
     const current: Record<string, string[]> = {};
     for (const k of Object.keys(lineWorkers)) current[k] = [...lineWorkers[k]];
+    for (const t of result.timelines) {
+      if (!current[t.name]) current[t.name] = [];
+    }
 
-    // line -> sorted list of {time, workers}
     const out: Record<string, { time: number; workers: string[] }[]> = {};
     for (const k of Object.keys(current)) {
       out[k] = [{ time: 0, workers: [...current[k]] }];
     }
-    // ensure timelines lines exist in out (zero-load may not have lineWorkers)
-    for (const t of result.timelines) {
-      if (!out[t.name]) out[t.name] = [{ time: 0, workers: [] }];
-      if (!current[t.name]) current[t.name] = [];
-    }
 
-    // Group moves by time
     const byTime = new Map<number, typeof sortedMoves>();
     for (const m of sortedMoves) {
       const arr = byTime.get(m.time) ?? [];
@@ -99,7 +94,6 @@ export function NamedReallocationPlan({
     return out;
   }, [sortedMoves, lineWorkers, overrides, result.timelines]);
 
-  // (line, workTime) 의 작업자 — snapshots에서 ≤ time 인 최신 스냅샷
   const workersAt = (line: string, time: number): string[] => {
     const arr = snapshots[line];
     if (!arr || arr.length === 0) return [];
@@ -111,32 +105,35 @@ export function NamedReallocationPlan({
     return best;
   };
 
-  // 클릭 상태
-  const [clicked, setClicked] = useState<{
-    worker: string;
-    from: string;
-    time: number;
-  } | null>(null);
-
-  // 이 작업자에 대해 'time 이후 from 라인에서 다른 라인으로의' 시뮬레이션 예정 이동 슬롯
-  const candidateDests = useMemo(() => {
-    if (!clicked) return [];
-    const out: { to: string; key: string; time: number }[] = [];
+  // 출발 라인별 외향 이동 (이동 라벨 렌더링용) — sortedMoves 인덱스 보존
+  const outgoingByLineTime = useMemo(() => {
+    const map = new Map<
+      string,
+      Map<
+        number,
+        { to: string; count: number; moveIdx: number }[]
+      >
+    >();
     let mi = 0;
     for (const m of sortedMoves) {
-      if (
-        m.from === clicked.from &&
-        m.time >= clicked.time - 1e-9 &&
-        m.to !== clicked.from
-      ) {
-        for (let si = 0; si < m.count; si++) {
-          out.push({ to: m.to, key: `${mi}-${si}`, time: m.time });
-        }
-      }
+      if (!map.has(m.from)) map.set(m.from, new Map());
+      const byT = map.get(m.from)!;
+      const arr = byT.get(m.time) ?? [];
+      arr.push({ to: m.to, count: m.count, moveIdx: mi });
+      byT.set(m.time, arr);
       mi++;
     }
-    return out;
-  }, [clicked, sortedMoves]);
+    return map;
+  }, [sortedMoves]);
+
+  // 이동 라벨 클릭 시 팝업 상태
+  const [pillModal, setPillModal] = useState<{
+    from: string;
+    to: string;
+    time: number;
+    count: number;
+    moveIdx: number;
+  } | null>(null);
 
   const trackBackground = (
     <>
@@ -160,27 +157,14 @@ export function NamedReallocationPlan({
     </>
   );
 
-  const handleWorkerClick = (worker: string, line: string, time: number) => {
-    setClicked({ worker, from: line, time });
-  };
-
-  // 도착지 선택 → 해당 destination의 첫 번째 미할당 슬롯에 worker override
-  const handleAssign = (to: string) => {
-    if (!clicked) return;
-    // 같은 to 의 슬롯들 중 아직 다른 사람이 override되지 않은(또는 이 사람과 같은) 첫 슬롯
-    const slot = candidateDests.find(
-      (d) => d.to === to && overrides[d.key] !== clicked.worker
-    );
-    if (slot) {
-      setOverrides({ ...overrides, [slot.key]: clicked.worker });
-    }
-    setClicked(null);
-  };
-
   return (
     <div className="card">
       <h2 className="font-semibold text-slate-900 mb-3">
-        재배치 (이름 지정 · 이름 클릭으로 이동 명령)
+        재배치 (이름 지정)
+        <span className="ml-2 text-xs font-normal text-slate-500">
+          노란색 = 인원 이동 / 파란색 = 그대로 유지 · 주황 라벨 클릭으로 누가 갈지
+          지정
+        </span>
       </h2>
 
       {/* 시간축 */}
@@ -225,7 +209,7 @@ export function NamedReallocationPlan({
             </div>
             <div className="flex-1 relative h-12 bg-slate-50 rounded overflow-hidden">
               {trackBackground}
-              {/* 작업없음 영역 (배경) */}
+              {/* 작업없음 영역 */}
               {(() => {
                 const REG = STANDARD_WORKTIME;
                 const maxEnd = t.segments.reduce(
@@ -262,7 +246,7 @@ export function NamedReallocationPlan({
                   ))
                 );
               })()}
-              {/* 작업 막대 (이름 표시) */}
+              {/* 작업 막대 (이름 표시, 클릭 X) */}
               {t.segments.flatMap((seg, si) => {
                 const total = seg.base + seg.added;
                 if (total === 0) return null;
@@ -275,37 +259,65 @@ export function NamedReallocationPlan({
                       className={cn(
                         "absolute top-0 bottom-0 rounded flex items-center justify-center gap-0.5 px-0.5 overflow-hidden",
                         seg.added > 0
-                          ? "bg-yellow-100 border border-yellow-300"
+                          ? "bg-yellow-200 border border-yellow-400"
                           : "bg-blue-500"
                       )}
                       style={{
                         left: `${pct(w.start)}%`,
                         width: `${widthPct}%`,
                       }}
+                      title={`${formatHM(w.start)}~${formatHM(w.end)} · ${names.slice(0, total).join(", ")}`}
                     >
                       {names.slice(0, total).map((name) => (
-                        <button
+                        <span
                           key={name}
-                          type="button"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleWorkerClick(name, t.name, w.start);
-                          }}
                           className={cn(
-                            "text-[10px] font-bold leading-none px-1 py-0.5 rounded hover:ring-2 hover:ring-orange-400 whitespace-nowrap truncate",
-                            seg.added > 0
-                              ? "text-slate-800"
-                              : "text-white hover:bg-blue-600"
+                            "text-[10px] font-bold leading-none px-1 whitespace-nowrap truncate",
+                            seg.added > 0 ? "text-slate-800" : "text-white"
                           )}
-                          title={`${name} · ${formatHM(w.start)}~${formatHM(w.end)} · 클릭해서 이동 명령`}
                         >
                           {name}
-                        </button>
+                        </span>
                       ))}
                     </div>
                   );
                 });
               })}
+              {/* 이동 라벨 (주황) — 클릭으로 누가 갈지 지정 */}
+              {(() => {
+                const byTime = outgoingByLineTime.get(t.name);
+                if (!byTime || byTime.size === 0) return null;
+                return Array.from(byTime.entries()).map(([time, ms]) => {
+                  const xPct = pct(workTimeToWall(time));
+                  return (
+                    <div
+                      key={`out-${time}`}
+                      className="absolute top-1/2 -translate-y-1/2 flex flex-col gap-0.5 z-10"
+                      style={{ left: `${xPct}%`, paddingLeft: 4 }}
+                    >
+                      {ms.map((m) => (
+                        <button
+                          key={`${m.moveIdx}`}
+                          type="button"
+                          onClick={() =>
+                            setPillModal({
+                              from: t.name,
+                              to: m.to,
+                              time,
+                              count: m.count,
+                              moveIdx: m.moveIdx,
+                            })
+                          }
+                          className="text-[11px] font-bold leading-tight px-2 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white shadow whitespace-nowrap cursor-pointer"
+                          title="클릭해서 누가 이동할지 지정"
+                        >
+                          {m.to}으로 {m.count}명 이동시킬 것
+                        </button>
+                      ))}
+                    </div>
+                  );
+                });
+              })()}
             </div>
             <div className="w-24 flex-shrink-0 text-xs text-right leading-tight">
               {t.loadHours <= 0.01 ? (
@@ -324,67 +336,130 @@ export function NamedReallocationPlan({
         ))}
       </div>
 
-      <div className="mt-2 text-[10px] text-slate-400">
-        · 작업자 이름을 클릭해서 이동 명령을 내릴 수 있습니다 · 가능한 이동은
-        시뮬레이션이 계획한 출발 라인의 도착지로 제한됩니다
+      {/* 범례 */}
+      <div className="flex items-center gap-3 mt-3 text-[10px] text-slate-500 flex-wrap">
+        <span className="inline-flex items-center gap-1">
+          <span className="w-3 h-3 rounded bg-blue-500 inline-block" />
+          파랑 = 인원 그대로 유지
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="w-3 h-3 rounded bg-yellow-200 border border-yellow-400 inline-block" />
+          노랑 = 인원 이동 발생
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-500 text-white">
+            이동시킬 것
+          </span>
+          ← 클릭해서 누가 갈지 지정
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="w-3 h-3 rounded bg-white border border-slate-200 inline-block" />
+          작업없음
+        </span>
       </div>
 
-      {/* 클릭 팝업 */}
-      {clicked && (
-        <div
-          className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
-          onClick={() => setClicked(null)}
-        >
-          <div
-            className="bg-white rounded-lg p-5 max-w-md w-full shadow-xl"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between mb-3">
-              <div>
-                <h3 className="font-bold text-base text-slate-900">
-                  {clicked.worker} 이동 명령
-                </h3>
-                <p className="text-sm text-slate-500 mt-1">
-                  {formatHM(workTimeToWall(clicked.time))} 시점 ·{" "}
-                  {clicked.from} 에서 어느 라인으로?
-                </p>
-              </div>
-              <button
-                onClick={() => setClicked(null)}
-                className="text-slate-400 hover:text-slate-600"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-            <div className="space-y-1">
-              {Array.from(new Set(candidateDests.map((d) => d.to))).map(
-                (to) => (
-                  <button
-                    key={to}
-                    type="button"
-                    onClick={() => handleAssign(to)}
-                    className="w-full text-left px-3 py-2 bg-blue-50 hover:bg-blue-100 text-blue-700 font-medium rounded text-sm"
-                  >
-                    → {to} 으로 보내기
-                  </button>
-                )
-              )}
-              {candidateDests.length === 0 && (
-                <p className="text-sm text-slate-500 px-1">
-                  이 시점 이후 {clicked.from} 에서 다른 라인으로의 예정 이동이
-                  없습니다.
-                </p>
-              )}
-            </div>
-            <button
-              onClick={() => setClicked(null)}
-              className="mt-4 w-full px-3 py-2 text-sm bg-slate-100 hover:bg-slate-200 rounded"
+      {/* 이동 지정 팝업 */}
+      {pillModal &&
+        (() => {
+          const sourceWorkers = workersAt(pillModal.from, pillModal.time);
+          // 이 이동에서 다른 슬롯에 이미 지정된 작업자 (중복 방지)
+          const otherSlotsPicked = (curSlot: number) =>
+            Array.from({ length: pillModal.count })
+              .map((_, i) =>
+                i !== curSlot
+                  ? overrides[`${pillModal.moveIdx}-${i}`] ?? null
+                  : null
+              )
+              .filter((x): x is string => !!x);
+
+          // 기본값: 슬롯 i 의 i 번째 작업자 (override 없을 때)
+          const defaultForSlot = (i: number) =>
+            overrides[`${pillModal.moveIdx}-${i}`] ??
+            sourceWorkers[i] ??
+            sourceWorkers[0] ??
+            "";
+
+          return (
+            <div
+              className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"
+              onClick={() => setPillModal(null)}
             >
-              취소
-            </button>
-          </div>
-        </div>
-      )}
+              <div
+                className="bg-white rounded-lg p-5 max-w-md w-full shadow-xl"
+                onClick={(e) => e.stopPropagation()}
+              >
+                <div className="flex items-start justify-between mb-3">
+                  <div>
+                    <h3 className="font-bold text-base text-slate-900">
+                      이동 지정
+                    </h3>
+                    <p className="text-sm text-slate-500 mt-1">
+                      <span className="font-semibold text-slate-700">
+                        {formatHM(workTimeToWall(pillModal.time))}
+                      </span>{" "}
+                      · {pillModal.from} → {pillModal.to} ·{" "}
+                      {pillModal.count}명 이동
+                    </p>
+                  </div>
+                  <button
+                    onClick={() => setPillModal(null)}
+                    className="text-slate-400 hover:text-slate-600"
+                  >
+                    <X className="w-5 h-5" />
+                  </button>
+                </div>
+                <div className="space-y-2 mb-4">
+                  {Array.from({ length: pillModal.count }, (_, i) => {
+                    const key = `${pillModal.moveIdx}-${i}`;
+                    const picked = otherSlotsPicked(i);
+                    const value = defaultForSlot(i);
+                    const options = sourceWorkers.filter(
+                      (w) => !picked.includes(w) || w === value
+                    );
+                    return (
+                      <div
+                        key={i}
+                        className="flex items-center gap-2 text-sm"
+                      >
+                        <span className="text-slate-500 w-16">
+                          {i + 1}번째:
+                        </span>
+                        {sourceWorkers.length > 0 ? (
+                          <select
+                            value={value}
+                            onChange={(e) =>
+                              setOverrides({
+                                ...overrides,
+                                [key]: e.target.value,
+                              })
+                            }
+                            className="flex-1 text-sm font-bold text-blue-700 bg-white border border-slate-300 rounded px-2 py-1"
+                          >
+                            {options.map((w) => (
+                              <option key={w} value={w}>
+                                {w}
+                              </option>
+                            ))}
+                          </select>
+                        ) : (
+                          <span className="text-rose-600 font-medium">
+                            (출발 라인에 가용 작업자 없음)
+                          </span>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+                <button
+                  onClick={() => setPillModal(null)}
+                  className="w-full px-3 py-2 text-sm bg-blue-600 hover:bg-blue-700 text-white font-medium rounded"
+                >
+                  완료
+                </button>
+              </div>
+            </div>
+          );
+        })()}
     </div>
   );
 }
