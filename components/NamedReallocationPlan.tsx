@@ -389,25 +389,27 @@ export function NamedReallocationPlan({
               )}
             </div>
           </div>
-          {/* 임시 셀 행 — 부모 라인 바로 아래 */}
+          {/* 임시 셀 행 — 부모 라인 바로 아래 (점선 테두리로 구분) */}
           {linesTempCells.map((cell, ci) => (
             <div
               key={cell.id}
-              className="flex items-center gap-2 mt-1.5"
+              className="flex items-center gap-2 mt-1.5 pl-1 pr-1 py-0.5 rounded border-2 border-dashed border-amber-600 bg-amber-50/50"
             >
               <div className="w-28 flex-shrink-0 flex items-center gap-1">
                 <div className="min-w-0 flex-1 leading-tight">
-                  <div className="text-xs font-medium text-purple-700 truncate">
+                  <div className="text-xs font-bold text-amber-700 truncate">
                     {t.name} 임시 #{ci + 1}
                   </div>
-                  <div className="text-[10px] text-slate-400">
-                    {cell.workerNames.length === 1 ? "1명 60%" : `${cell.workerNames.length}명`}
+                  <div className="text-[10px] text-slate-500">
+                    {cell.workerNames.length === 1
+                      ? "1명 60%"
+                      : `${cell.workerNames.length}명`}
                   </div>
                 </div>
               </div>
               <div className="flex-1 relative h-12 bg-slate-50 rounded overflow-hidden">
                 {trackBackground}
-                {/* 임시 셀 작업 막대 (보라) */}
+                {/* 임시 셀 작업 막대 (노란색 + 점선 테두리로 임시 표시) */}
                 {(() => {
                   if (
                     cell.workerNames.length === 0 ||
@@ -423,17 +425,17 @@ export function NamedReallocationPlan({
                       return (
                         <div
                           key={`tc-${wi}`}
-                          className="absolute top-0 bottom-0 rounded flex items-center justify-center gap-0.5 px-0.5 overflow-hidden bg-purple-500 border border-purple-600"
+                          className="absolute top-0 bottom-0 rounded flex items-center justify-center gap-0.5 px-0.5 overflow-hidden bg-yellow-300 border-2 border-dashed border-amber-700"
                           style={{
                             left: `${pct(w.start)}%`,
                             width: `${widthPct}%`,
                           }}
-                          title={`${formatHM(w.start)}~${formatHM(w.end)} · ${cell.workerNames.join(", ")}`}
+                          title={`${formatHM(w.start)}~${formatHM(w.end)} · 임시 셀 · ${cell.workerNames.join(", ")}`}
                         >
                           {cell.workerNames.map((name) => (
                             <span
                               key={name}
-                              className="text-[10px] font-bold leading-none px-1 whitespace-nowrap truncate text-white"
+                              className="text-[10px] font-bold leading-none px-1 whitespace-nowrap truncate text-slate-900"
                             >
                               {name}
                             </span>
@@ -445,7 +447,7 @@ export function NamedReallocationPlan({
                 })()}
               </div>
               <div className="w-24 flex-shrink-0 text-xs text-right leading-tight">
-                <span className="text-purple-700 font-medium whitespace-nowrap">
+                <span className="text-amber-700 font-bold whitespace-nowrap">
                   {(() => {
                     const dur = Math.max(0, cell.endWt - cell.startWt);
                     const eff =
