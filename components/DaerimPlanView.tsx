@@ -9,6 +9,7 @@ import { EmptyState } from "@/components/EmptyState";
 import { ReallocationPlan } from "@/components/ReallocationPlan";
 import { NamedReallocationPlan } from "@/components/NamedReallocationPlan";
 import { WorkerRosterByTime } from "@/components/WorkerRosterByTime";
+import { RealMetricsPanel } from "@/components/RealMetricsPanel";
 import {
   TempCellEditor,
   type TempCell,
@@ -28,8 +29,7 @@ export function DaerimPlanView() {
   const hydrated = useHydrated();
   const workDate = useDataStore((s) => s.workDate);
   const { groups, extraFree, missing, lineWorkers } = useDaerimRealloc();
-  const [tab, setTab] = useState<"count" | "named">("count");
-  // 이름 지정 탭의 이동 override 상태 — 간트 클릭과 패널 드롭다운이 공유
+  // 이동 override (간트 라벨 클릭으로 누가 갈지 지정)
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   // 임시 셀(보조 작업셀) 상태
   const [tempCells, setTempCells] = useState<TempCell[]>([]);
@@ -80,82 +80,45 @@ export function DaerimPlanView() {
         </Link>
       </div>
 
-      {/* 탭 전환 */}
-      <div className="flex gap-1 border-b border-slate-200">
-        <button
-          type="button"
-          onClick={() => setTab("count")}
-          className={cn(
-            "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-            tab === "count"
-              ? "border-blue-600 text-blue-700"
-              : "border-transparent text-slate-500 hover:text-slate-700"
-          )}
-        >
-          재배치 계획 (인원수)
-        </button>
-        <button
-          type="button"
-          onClick={() => setTab("named")}
-          className={cn(
-            "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
-            tab === "named"
-              ? "border-blue-600 text-blue-700"
-              : "border-transparent text-slate-500 hover:text-slate-700"
-          )}
-        >
-          재배치 계획 (이름 지정)
-        </button>
-      </div>
+      {/* 재배치 개선 효과 (기본 배치 → 재배치) */}
+      <ImprovementSummary rBasic={rBasic} rReal={rReal} />
 
-      {tab === "count" ? (
-        <>
-          {/* 재배치 개선 효과 (기본 배치 → 재배치) */}
-          <ImprovementSummary rBasic={rBasic} rReal={rReal} />
+      {/* 기본 배치 간트 (참고용) */}
+      <ReallocationPlan
+        groups={groups}
+        extraFree={extraFree}
+        disableRealloc
+        title="기본 배치 (인원 이동 없음)"
+        defaultOpen
+      />
 
-          {/* ① 기본 배치 (재배치 없음) */}
-          <ReallocationPlan
-            groups={groups}
-            extraFree={extraFree}
-            disableRealloc
-            title="① 기본 배치 (인원 이동 없음)"
-            defaultOpen
-          />
+      {/* 재배치 결과 지표 */}
+      <RealMetricsPanel result={rReal} title="재배치 결과 지표" />
 
-          {/* ② 재배치 로직 — 인원 이동 라벨 포함 */}
-          <ReallocationPlan
-            groups={groups}
-            extraFree={extraFree}
-            title="② 재배치 로직 적용 (인원 이동 표시)"
-            defaultOpen
-          />
-        </>
-      ) : (
-        <>
-          {/* 이름 지정 view — 작업자명이 보이는 간트 + 주황 라벨 클릭으로 이동 지정 */}
-          <NamedReallocationPlan
-            result={rReal}
-            lineWorkers={lineWorkers}
-            overrides={overrides}
-            setOverrides={setOverrides}
-            tempCells={tempCells}
-          />
-          {/* 임시 셀 운영 — 이월 부담 라인의 보조 셀 구성 */}
-          <TempCellEditor
-            result={rReal}
-            lineWorkers={lineWorkers}
-            overrides={overrides}
-            tempCells={tempCells}
-            setTempCells={setTempCells}
-          />
-          {/* 시간대별 라인 작업자 정리 */}
-          <WorkerRosterByTime
-            result={rReal}
-            lineWorkers={lineWorkers}
-            overrides={overrides}
-          />
-        </>
-      )}
+      {/* 재배치 (이름 지정) — 메인 간트: 클릭으로 이동 지정 */}
+      <NamedReallocationPlan
+        result={rReal}
+        lineWorkers={lineWorkers}
+        overrides={overrides}
+        setOverrides={setOverrides}
+        tempCells={tempCells}
+      />
+
+      {/* 임시 셀 운영 — 이월 부담 라인의 보조 셀 구성 */}
+      <TempCellEditor
+        result={rReal}
+        lineWorkers={lineWorkers}
+        overrides={overrides}
+        tempCells={tempCells}
+        setTempCells={setTempCells}
+      />
+
+      {/* 시간대별 라인 작업자 정리 */}
+      <WorkerRosterByTime
+        result={rReal}
+        lineWorkers={lineWorkers}
+        overrides={overrides}
+      />
     </div>
   );
 }
