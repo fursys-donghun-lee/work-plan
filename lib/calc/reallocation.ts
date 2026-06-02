@@ -329,14 +329,51 @@ export function computeReallocation(
     for (let i = 0; i < ef.count; i++) freePool.push({ origin: ef.origin });
   }
 
-  // 아침 짝 우선 재배치 — 모든 비자동 인원을 풀에 모아 우선순위 라인부터 2명 짝 배정
-  //  · 출근으로 분산된 1명 라인들을 재구성: 우선순위 높은 라인 2명, 낮은 라인은 비워두고 대기
-  //  · 자기 라인 복귀는 ownIdx 로 base 로 복원되므로 불필요한 이동 표시 없음
-  for (const g of gs) {
-    if (g.autoManaged) continue;
-    for (let i = 0; i < g.base; i++) freePool.push({ origin: g.name });
-    g.base = 0;
-    g.segBase = 0;
+  // 아침 짝 우선 재배치 — 계획 후 잉여만 방출 (출근 인원은 가능한 한 자기 라인 유지)
+  //  1) 비자동 부하 라인을 우선순위(긴급→부하 큰 순)로 정렬
+  //  2) 총 인원풀(비자동 출근 + 자동 잉여)을 위에서부터 2명씩 배정 — 짝 목표
+  //  3) 홀수 1명 잉여 → '기본 위치' 우선(출근 인원 1명인 라인을 솔로 목표로)
+  //  4) 각 라인 base 를 min(출근, 목표)로 줄이고 잉여만 풀로
+  {
+    const sortedLoaded = gs
+      .filter((g) => !g.autoManaged && g.loadHours > EPS)
+      .sort((a, b) => {
+        if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
+        return b.loadHours - a.loadHours;
+      });
+    const totalNonAuto = gs.reduce(
+      (s, g) => (g.autoManaged ? s : s + g.base),
+      0
+    );
+    const totalPool = totalNonAuto + extraFreeCount;
+    const pairCount = Math.floor(totalPool / 2);
+    const hasSoloLeftover = totalPool % 2 === 1;
+
+    const targets = new Map<string, number>();
+    // 상위 pairCount 라인은 짝(2명)
+    sortedLoaded
+      .slice(0, pairCount)
+      .forEach((g) => targets.set(g.name, 2));
+    // 솔로 잉여 1명: '기본 위치' 우선 — 짝 목표 밖 라인 중 출근 1명인 라인 우선
+    if (hasSoloLeftover) {
+      const outsideTop = sortedLoaded.slice(pairCount);
+      const soloLine =
+        outsideTop.find((g) => g.base === 1) ?? outsideTop[0];
+      if (soloLine) targets.set(soloLine.name, 1);
+    }
+    // 나머지는 target 0 (Map 에 없는 라인은 0으로 처리)
+
+    // 잉여만 풀로 (출근 인원 ≤ 목표면 유지)
+    for (const g of gs) {
+      if (g.autoManaged) continue;
+      const tgt = targets.get(g.name) ?? 0;
+      if (g.base > tgt) {
+        const surplus = g.base - tgt;
+        for (let i = 0; i < surplus; i++) freePool.push({ origin: g.name });
+        g.base = tgt;
+        g.segBase = tgt;
+      }
+    }
   }
 
   // 무부하 일반 그룹 인원 → 즉시 여유 풀

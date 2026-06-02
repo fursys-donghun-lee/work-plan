@@ -232,9 +232,7 @@ export function ReallocationPlan({
             </div>
 
             <div className="space-y-1.5">
-              {result.timelines
-                .filter((t) => t.loadHours > 0.01)
-                .map((t) => (
+              {result.timelines.map((t) => (
                   <div key={t.name} className="flex items-center gap-2">
                     <div className="w-28 flex-shrink-0 text-xs font-medium text-slate-700 truncate flex items-center gap-1">
                       {t.urgent && (
@@ -249,8 +247,9 @@ export function ReallocationPlan({
                       {trackBackground}
                       {/* 유휴(노는 시간) — 사람이 투입되지 않은 구간을 연한 빨강으로
                           · 정규시간 내 미투입 (작업 전 대기 · 종료 후)
-                          · 잔업에 들어간 라인은 21:00까지 비는 시간도 유휴 */}
-                      {(() => {
+                          · 잔업에 들어간 라인은 21:00까지 비는 시간도 유휴
+                          · 부하 자체가 없는 라인은 유휴 표시 안 함 (작업 대상 아님) */}
+                      {t.loadHours <= 0.01 ? null : (() => {
                         const REG = STANDARD_WORKTIME; // 정규 8h
                         // 잔업까지 일한 라인이면 21:00(MAX_WORKTIME)까지, 아니면 17:30까지를 대상
                         const maxEnd = t.segments.reduce(
@@ -389,7 +388,11 @@ export function ReallocationPlan({
                         })()}
                     </div>
                     <div className="w-14 flex-shrink-0 text-xs text-right">
-                      {t.finishTime !== null ? (
+                      {t.loadHours <= 0.01 ? (
+                        <span className="text-slate-300" title="부하 없음">
+                          —
+                        </span>
+                      ) : t.finishTime !== null ? (
                         <span className="text-slate-500">
                           {formatHM(workTimeToWall(t.finishTime))}
                         </span>
