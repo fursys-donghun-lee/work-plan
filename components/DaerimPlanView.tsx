@@ -1,12 +1,13 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import Link from "next/link";
 import { TrendingUp, TrendingDown, Minus } from "lucide-react";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useHydrated } from "@/components/useComputed";
 import { EmptyState } from "@/components/EmptyState";
 import { ReallocationPlan } from "@/components/ReallocationPlan";
+import { NamedMovesPanel } from "@/components/NamedMovesPanel";
 import { useDaerimRealloc } from "@/components/useDaerimRealloc";
 import {
   computeReallocation,
@@ -21,7 +22,8 @@ const utilOf = (r: { availableLoad: number; workHours: number }) =>
 export function DaerimPlanView() {
   const hydrated = useHydrated();
   const workDate = useDataStore((s) => s.workDate);
-  const { groups, extraFree, missing } = useDaerimRealloc();
+  const { groups, extraFree, missing, lineWorkers } = useDaerimRealloc();
+  const [tab, setTab] = useState<"count" | "named">("count");
 
   // 기본 배치 vs 재배치 결과 → 개선 효과(델타) 계산
   const rBasic = useMemo(
@@ -69,25 +71,68 @@ export function DaerimPlanView() {
         </Link>
       </div>
 
-      {/* 재배치 개선 효과 (기본 배치 → 재배치) */}
-      <ImprovementSummary rBasic={rBasic} rReal={rReal} />
+      {/* 탭 전환 */}
+      <div className="flex gap-1 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setTab("count")}
+          className={cn(
+            "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+            tab === "count"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          )}
+        >
+          재배치 계획 (인원수)
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("named")}
+          className={cn(
+            "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+            tab === "named"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          )}
+        >
+          재배치 계획 (이름 지정)
+        </button>
+      </div>
 
-      {/* ① 기본 배치 (재배치 없음) */}
-      <ReallocationPlan
-        groups={groups}
-        extraFree={extraFree}
-        disableRealloc
-        title="① 기본 배치 (인원 이동 없음)"
-        defaultOpen
-      />
+      {tab === "count" ? (
+        <>
+          {/* 재배치 개선 효과 (기본 배치 → 재배치) */}
+          <ImprovementSummary rBasic={rBasic} rReal={rReal} />
 
-      {/* ② 재배치 로직 — 인원 이동 라벨 포함 */}
-      <ReallocationPlan
-        groups={groups}
-        extraFree={extraFree}
-        title="② 재배치 로직 적용 (인원 이동 표시)"
-        defaultOpen
-      />
+          {/* ① 기본 배치 (재배치 없음) */}
+          <ReallocationPlan
+            groups={groups}
+            extraFree={extraFree}
+            disableRealloc
+            title="① 기본 배치 (인원 이동 없음)"
+            defaultOpen
+          />
+
+          {/* ② 재배치 로직 — 인원 이동 라벨 포함 */}
+          <ReallocationPlan
+            groups={groups}
+            extraFree={extraFree}
+            title="② 재배치 로직 적용 (인원 이동 표시)"
+            defaultOpen
+          />
+        </>
+      ) : (
+        <>
+          {/* 이름 지정 view — 재배치 간트 + 이름 지정 이동 명단 */}
+          <ReallocationPlan
+            groups={groups}
+            extraFree={extraFree}
+            title="재배치 로직 (간트)"
+            defaultOpen
+          />
+          <NamedMovesPanel result={rReal} lineWorkers={lineWorkers} />
+        </>
+      )}
     </div>
   );
 }

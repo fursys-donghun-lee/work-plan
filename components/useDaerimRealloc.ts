@@ -19,6 +19,7 @@ export function useDaerimRealloc(): {
   groups: ReallocGroupInput[];
   extraFree: ReallocExtraFree[];
   missing: string[];
+  lineWorkers: Record<string, string[]>; // 라인 이름 → 작업자 이름 리스트
 } {
   const packagePosition = useDataStore((s) => s.packagePosition);
   const packageLoad = useDataStore((s) => s.packageLoad);
@@ -157,5 +158,24 @@ export function useDaerimRealloc(): {
   const extraFree: ReallocExtraFree[] =
     autoExtra > 0 ? [{ origin: "자동포장라인", count: autoExtra }] : [];
 
-  return { groups, extraFree, missing };
+  // 라인별 작업자 이름 리스트 (재배치 이름 지정 view 용)
+  const lineWorkers: Record<string, string[]> = {};
+  for (const g of nonAutoGroups) {
+    const names = g.presentMembers.map((m) => m.name);
+    for (let i = 0; i < g.supportCount; i++) {
+      names.push(`지원자${i + 1}`);
+    }
+    lineWorkers[g.group] = names;
+  }
+  // 자동포장라인은 그룹 합쳐서 하나 — 출근자 이름 모두 포함
+  const autoNames: string[] = [];
+  for (const g of autoGroups) {
+    for (const m of g.presentMembers) autoNames.push(m.name);
+    for (let i = 0; i < g.supportCount; i++) {
+      autoNames.push(`${g.group}지원${i + 1}`);
+    }
+  }
+  lineWorkers["자동포장라인"] = autoNames;
+
+  return { groups, extraFree, missing, lineWorkers };
 }

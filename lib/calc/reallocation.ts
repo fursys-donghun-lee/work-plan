@@ -196,6 +196,7 @@ export function computeReallocation(
     autoManaged: boolean;
     dropped: boolean; // 잔업 안 하기로 하고 정지(이월)된 라인
     otTarget: number; // 잔업 시 허용 최대 인원 (잔업인원 최소화용)
+    tempOfParent?: string; // 보조 라인일 경우 부모 라인 이름
   }
 
   const gs: G[] = groupsInput.map((g) => ({
@@ -493,6 +494,67 @@ export function computeReallocation(
       }
     }
 
+    // 1.5) 보조 라인 생성 — 정규시간 내 남는 인원(≥2명)이 있고 정규시간 안에 못 끝낼
+    //      부하 무거운 짝 라인이 있으면, 보조 라인을 만들어 부하 일부를 병행 처리
+    if (time < standardEnd - EPS && freePool.length >= 2) {
+      let spawned = 0;
+      while (freePool.length >= 2 && spawned < 5) {
+        const remTime = standardEnd - time;
+        const heavyCandidates = gs
+          .filter(
+            (g) =>
+              !g.autoManaged &&
+              !g.dropped &&
+              !g.tempOfParent &&
+              hc(g) >= 2 &&
+              g.remaining > 2 * remTime + EPS // 짝만으로는 정규 내 못 끝냄
+          )
+          .sort((a, b) => b.remaining - a.remaining);
+        if (heavyCandidates.length === 0) break;
+        const parent = heavyCandidates[0];
+        const tempName = `${parent.name} 보조`;
+        if (gs.some((g) => g.name === tempName)) break;
+        const halfLoad = Math.max(2, Math.round(parent.remaining / 2));
+        if (halfLoad < 2) break;
+
+        // 부모 부하/잔여 분할 (보조가 절반 가져감)
+        parent.loadHours = Math.max(0, parent.loadHours - halfLoad);
+        parent.remaining = Math.max(0, parent.remaining - halfLoad);
+
+        // 보조 라인 G 생성
+        const tempG: G = {
+          name: tempName,
+          loadHours: halfLoad,
+          remaining: halfLoad,
+          base: 0,
+          added: 0,
+          initialHeadcount: 0,
+          segments: [],
+          segStart: time,
+          segBase: 0,
+          segAdded: 0,
+          finishTime: null,
+          urgent: parent.urgent,
+          autoManaged: false,
+          dropped: false,
+          otTarget: MAX_HEADCOUNT,
+          tempOfParent: parent.name,
+        };
+
+        // 풀에서 2명 보조 라인에 배치 (added=2)
+        for (let i = 0; i < 2; i++) {
+          if (freePool.length === 0) break;
+          const w = freePool.shift()!;
+          tempG.added += 1;
+          tempG.segAdded = tempG.added;
+          rawMoves.push({ time, count: 1, from: w.origin, to: tempName });
+        }
+
+        gs.push(tempG);
+        spawned += 1;
+      }
+    }
+
     // 2) 30분 진행
     const active = gs.filter(
       (g) => !g.autoManaged && g.remaining > EPS && hc(g) > 0
@@ -560,16 +622,43 @@ export function computeReallocation(
     hasOvertime: overtimeHours > EPS,
     overtimeHours,
     moves,
-    timelines: gs.map((g) => ({
-      name: g.name,
-      loadHours: g.loadHours,
-      initialHeadcount: g.initialHeadcount,
-      segments: g.segments,
-      finishTime: g.remaining > EPS ? null : g.finishTime,
-      carryHours: round30(Math.max(0, g.remaining)),
-      urgent: g.urgent,
-      autoManaged: g.autoManaged,
-    })),
+    timelines: (() => {
+      // 보조 라인은 부모 라인 바로 뒤에 오도록 정렬 (그 외 입력 순서 유지)
+      const orderedIndices = gs.map((_, i) => i);
+      const finalOrder: number[] = [];
+      const visited = new Set<number>();
+      for (const idx of orderedIndices) {
+        if (visited.has(idx)) continue;
+        const g = gs[idx];
+        if (g.tempOfParent) continue; // 보조는 부모와 함께 처리
+        finalOrder.push(idx);
+        visited.add(idx);
+        // 이 라인을 부모로 하는 보조 라인들 바로 뒤에 삽입
+        gs.forEach((other, otherIdx) => {
+          if (other.tempOfParent === g.name && !visited.has(otherIdx)) {
+            finalOrder.push(otherIdx);
+            visited.add(otherIdx);
+          }
+        });
+      }
+      // 부모 없이 떠도는 보조(예외 케이스)는 뒤에
+      orderedIndices.forEach((idx) => {
+        if (!visited.has(idx)) finalOrder.push(idx);
+      });
+      return finalOrder.map((idx) => {
+        const g = gs[idx];
+        return {
+          name: g.name,
+          loadHours: g.loadHours,
+          initialHeadcount: g.initialHeadcount,
+          segments: g.segments,
+          finishTime: g.remaining > EPS ? null : g.finishTime,
+          carryHours: round30(Math.max(0, g.remaining)),
+          urgent: g.urgent,
+          autoManaged: g.autoManaged,
+        };
+      });
+    })(),
     totalLoad,
     totalPeople,
     totalCarry: round30(totalCarry),
