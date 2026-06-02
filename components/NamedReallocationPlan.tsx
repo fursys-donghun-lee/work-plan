@@ -49,8 +49,8 @@ export function NamedReallocationPlan({
     [result.moves]
   );
 
-  // 시간순 작업자 스냅샷 (라인 → [{time, workers}])
-  const snapshots = useMemo(() => {
+  // 시간순 작업자 스냅샷 + 이동별 배정 추적
+  const { snapshots, moveAssignments } = useMemo(() => {
     const current: Record<string, string[]> = {};
     for (const k of Object.keys(lineWorkers)) current[k] = [...lineWorkers[k]];
     for (const t of result.timelines) {
@@ -61,6 +61,8 @@ export function NamedReallocationPlan({
     for (const k of Object.keys(current)) {
       out[k] = [{ time: 0, workers: [...current[k]] }];
     }
+    // moveAssignments[moveIdx] = [작업자명 슬롯 0, 슬롯 1, ...]
+    const assignments: string[][] = [];
 
     const byTime = new Map<number, typeof sortedMoves>();
     for (const m of sortedMoves) {
@@ -73,17 +75,20 @@ export function NamedReallocationPlan({
     for (const t of times) {
       const ms = byTime.get(t)!;
       for (const m of ms) {
+        const slots: string[] = [];
         for (let si = 0; si < m.count; si++) {
           const key = `${mi}-${si}`;
           const ov = overrides[key];
           const fromList = current[m.from] ?? [];
           const worker =
-            ov && fromList.includes(ov) ? ov : fromList[0] ?? null;
+            ov && fromList.includes(ov) ? ov : fromList[0] ?? "";
+          slots.push(worker);
           if (worker) {
             current[m.from] = fromList.filter((w) => w !== worker);
             current[m.to] = [...(current[m.to] ?? []), worker];
           }
         }
+        assignments[mi] = slots;
         mi++;
       }
       for (const k of Object.keys(current)) {
@@ -91,7 +96,7 @@ export function NamedReallocationPlan({
         out[k].push({ time: t, workers: [...current[k]] });
       }
     }
-    return out;
+    return { snapshots: out, moveAssignments: assignments };
   }, [sortedMoves, lineWorkers, overrides, result.timelines]);
 
   const workersAt = (line: string, time: number): string[] => {
@@ -295,25 +300,37 @@ export function NamedReallocationPlan({
                       className="absolute top-1/2 -translate-y-1/2 flex flex-col gap-0.5 z-10"
                       style={{ left: `${xPct}%`, paddingLeft: 4 }}
                     >
-                      {ms.map((m) => (
-                        <button
-                          key={`${m.moveIdx}`}
-                          type="button"
-                          onClick={() =>
-                            setPillModal({
-                              from: t.name,
-                              to: m.to,
-                              time,
-                              count: m.count,
-                              moveIdx: m.moveIdx,
-                            })
-                          }
-                          className="text-[11px] font-bold leading-tight px-2 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white shadow whitespace-nowrap cursor-pointer"
-                          title="클릭해서 누가 이동할지 지정"
-                        >
-                          {m.to}으로 {m.count}명 이동시킬 것
-                        </button>
-                      ))}
+                      {ms.map((m) => {
+                        const assigned = (moveAssignments[m.moveIdx] ?? []).filter(
+                          (n) => n
+                        );
+                        return (
+                          <button
+                            key={`${m.moveIdx}`}
+                            type="button"
+                            onClick={() =>
+                              setPillModal({
+                                from: t.name,
+                                to: m.to,
+                                time,
+                                count: m.count,
+                                moveIdx: m.moveIdx,
+                              })
+                            }
+                            className="text-[11px] font-bold leading-tight px-2 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white shadow whitespace-nowrap cursor-pointer text-left"
+                            title="클릭해서 누가 이동할지 지정"
+                          >
+                            <div>
+                              {m.to}으로 {m.count}명 이동시킬 것
+                            </div>
+                            {assigned.length > 0 && (
+                              <div className="text-[10px] font-semibold text-orange-50 mt-0.5">
+                                → {assigned.join(", ")}
+                              </div>
+                            )}
+                          </button>
+                        );
+                      })}
                     </div>
                   );
                 });
