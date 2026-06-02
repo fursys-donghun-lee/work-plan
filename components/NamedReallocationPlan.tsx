@@ -354,17 +354,13 @@ export function NamedReallocationPlan({
                                 moveIdx: m.moveIdx,
                               })
                             }
-                            className="text-[11px] font-bold leading-tight px-2 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white shadow whitespace-nowrap cursor-pointer text-left"
+                            className="text-[11px] font-bold leading-none px-2 py-1 rounded bg-orange-500 hover:bg-orange-600 text-white shadow whitespace-nowrap cursor-pointer"
                             title="클릭해서 누가 이동할지 지정"
                           >
-                            <div>
-                              {m.to}으로 {m.count}명 이동시킬 것
-                            </div>
-                            {assigned.length > 0 && (
-                              <div className="text-[10px] font-semibold text-orange-50 mt-0.5">
-                                → {assigned.join(", ")}
-                              </div>
-                            )}
+                            {m.to}으로 {m.count}명 이동
+                            {assigned.length > 0
+                              ? `(${assigned.join(", ")})`
+                              : ""}
                           </button>
                         );
                       })}
@@ -402,7 +398,7 @@ export function NamedReallocationPlan({
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-orange-500 text-white">
-            이동시킬 것
+            OO으로 N명 이동(이름)
           </span>
           ← 클릭해서 누가 갈지 지정
         </span>
