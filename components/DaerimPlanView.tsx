@@ -10,6 +10,7 @@ import { ReallocationPlan } from "@/components/ReallocationPlan";
 import { NamedReallocationPlan } from "@/components/NamedReallocationPlan";
 import { WorkerRosterByTime } from "@/components/WorkerRosterByTime";
 import { RealMetricsPanel } from "@/components/RealMetricsPanel";
+import { DragPlanView } from "@/components/DragPlanView";
 import {
   TempCellEditor,
   type TempCell,
@@ -33,6 +34,8 @@ export function DaerimPlanView() {
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   // 임시 셀(보조 작업셀) 상태
   const [tempCells, setTempCells] = useState<TempCell[]>([]);
+  // 탭 (재배치 계획 / 수동 배치)
+  const [tab, setTab] = useState<"main" | "drag">("main");
 
   // 기본 배치 vs 재배치 결과 → 개선 효과(델타) 계산
   const rBasic = useMemo(
@@ -80,45 +83,79 @@ export function DaerimPlanView() {
         </Link>
       </div>
 
-      {/* 재배치 개선 효과 (기본 배치 → 재배치) */}
-      <ImprovementSummary rBasic={rBasic} rReal={rReal} />
+      {/* 탭 */}
+      <div className="flex gap-1 border-b border-slate-200">
+        <button
+          type="button"
+          onClick={() => setTab("main")}
+          className={cn(
+            "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+            tab === "main"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          )}
+        >
+          재배치 계획
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab("drag")}
+          className={cn(
+            "px-4 py-2 text-sm font-medium border-b-2 -mb-px transition-colors",
+            tab === "drag"
+              ? "border-blue-600 text-blue-700"
+              : "border-transparent text-slate-500 hover:text-slate-700"
+          )}
+        >
+          수동 배치 (드래그앤드롭)
+        </button>
+      </div>
 
-      {/* 기본 배치 간트 (참고용) */}
-      <ReallocationPlan
-        groups={groups}
-        extraFree={extraFree}
-        disableRealloc
-        title="기본 배치 (인원 이동 없음)"
-        defaultOpen
-      />
+      {tab === "main" ? (
+        <>
+          {/* 재배치 개선 효과 (기본 배치 → 재배치) */}
+          <ImprovementSummary rBasic={rBasic} rReal={rReal} />
 
-      {/* 재배치 결과 지표 */}
-      <RealMetricsPanel result={rReal} title="재배치 결과 지표" />
+          {/* 기본 배치 간트 (참고용) */}
+          <ReallocationPlan
+            groups={groups}
+            extraFree={extraFree}
+            disableRealloc
+            title="기본 배치 (인원 이동 없음)"
+            defaultOpen
+          />
 
-      {/* 재배치 (이름 지정) — 메인 간트: 클릭으로 이동 지정 */}
-      <NamedReallocationPlan
-        result={rReal}
-        lineWorkers={lineWorkers}
-        overrides={overrides}
-        setOverrides={setOverrides}
-        tempCells={tempCells}
-      />
+          {/* 재배치 결과 지표 */}
+          <RealMetricsPanel result={rReal} title="재배치 결과 지표" />
 
-      {/* 임시 셀 운영 — 이월 부담 라인의 보조 셀 구성 */}
-      <TempCellEditor
-        result={rReal}
-        lineWorkers={lineWorkers}
-        overrides={overrides}
-        tempCells={tempCells}
-        setTempCells={setTempCells}
-      />
+          {/* 재배치 (이름 지정) — 메인 간트: 클릭으로 이동 지정 */}
+          <NamedReallocationPlan
+            result={rReal}
+            lineWorkers={lineWorkers}
+            overrides={overrides}
+            setOverrides={setOverrides}
+            tempCells={tempCells}
+          />
 
-      {/* 시간대별 라인 작업자 정리 */}
-      <WorkerRosterByTime
-        result={rReal}
-        lineWorkers={lineWorkers}
-        overrides={overrides}
-      />
+          {/* 임시 셀 운영 — 이월 부담 라인의 보조 셀 구성 */}
+          <TempCellEditor
+            result={rReal}
+            lineWorkers={lineWorkers}
+            overrides={overrides}
+            tempCells={tempCells}
+            setTempCells={setTempCells}
+          />
+
+          {/* 시간대별 라인 작업자 정리 */}
+          <WorkerRosterByTime
+            result={rReal}
+            lineWorkers={lineWorkers}
+            overrides={overrides}
+          />
+        </>
+      ) : (
+        <DragPlanView result={rReal} lineWorkers={lineWorkers} />
+      )}
     </div>
   );
 }
