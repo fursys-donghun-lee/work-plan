@@ -4,8 +4,6 @@ import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   formatHM,
-  workTimeToWall,
-  STANDARD_WORKTIME,
   MAX_WORKTIME,
   type ReallocResult,
 } from "@/lib/calc/reallocation";
@@ -126,16 +124,25 @@ export function DragPlanView({ result, lineWorkers }: Props) {
   // 초기화
   const handleReset = () => setAssignments(initialAssignments);
 
-  // 시간 라벨
-  const hourLabels = useMemo(
-    () =>
-      Array.from({ length: HOUR_COUNT }, (_, h) => ({
-        wt: h,
-        wall: formatHM(workTimeToWall(h)),
-        isOT: h >= STANDARD_WORKTIME,
-      })),
-    []
-  );
+  // 시간 슬롯 — 근무 셀과 휴게(점심·저녁) 셀이 섞여 있는 시간축
+  type Slot =
+    | { type: "work"; wt: number; wallStart: number; wallEnd: number; isOT: boolean; isFirstOT: boolean }
+    | { type: "break"; label: string; wallStart: number; wallEnd: number };
+  const slots: Slot[] = [
+    { type: "work", wt: 0, wallStart: 8.5, wallEnd: 9.5, isOT: false, isFirstOT: false },
+    { type: "work", wt: 1, wallStart: 9.5, wallEnd: 10.5, isOT: false, isFirstOT: false },
+    { type: "work", wt: 2, wallStart: 10.5, wallEnd: 11.5, isOT: false, isFirstOT: false },
+    { type: "work", wt: 3, wallStart: 11.5, wallEnd: 12.5, isOT: false, isFirstOT: false },
+    { type: "break", label: "점심", wallStart: 12.5, wallEnd: 13.5 },
+    { type: "work", wt: 4, wallStart: 13.5, wallEnd: 14.5, isOT: false, isFirstOT: false },
+    { type: "work", wt: 5, wallStart: 14.5, wallEnd: 15.5, isOT: false, isFirstOT: false },
+    { type: "work", wt: 6, wallStart: 15.5, wallEnd: 16.5, isOT: false, isFirstOT: false },
+    { type: "work", wt: 7, wallStart: 16.5, wallEnd: 17.5, isOT: false, isFirstOT: false },
+    { type: "break", label: "저녁", wallStart: 17.5, wallEnd: 18.0 },
+    { type: "work", wt: 8, wallStart: 18.0, wallEnd: 19.0, isOT: true, isFirstOT: true },
+    { type: "work", wt: 9, wallStart: 19.0, wallEnd: 20.0, isOT: true, isFirstOT: false },
+    { type: "work", wt: 10, wallStart: 20.0, wallEnd: 21.0, isOT: true, isFirstOT: false },
+  ];
 
   return (
     <div className="card">
@@ -165,22 +172,44 @@ export function DragPlanView({ result, lineWorkers }: Props) {
               <th className="border-b border-slate-200 px-2 py-1 text-center font-semibold text-slate-600 w-24 min-w-[6rem]">
                 부하/처리
               </th>
-              {hourLabels.map((h) => (
-                <th
-                  key={h.wt}
-                  className={cn(
-                    "border-b border-slate-200 px-1 py-1 text-center text-[10px] font-medium w-20 min-w-[5rem]",
-                    h.isOT && "bg-rose-50/40",
-                    h.wt === STANDARD_WORKTIME &&
-                      "border-l-2 border-l-rose-300"
-                  )}
-                >
-                  <div className="text-slate-700">{h.wall}</div>
-                  {h.isOT && (
-                    <div className="text-[9px] text-rose-600">잔업</div>
-                  )}
-                </th>
-              ))}
+              {slots.map((s, idx) => {
+                if (s.type === "break") {
+                  return (
+                    <th
+                      key={`brk-${idx}`}
+                      className="border-b border-slate-300 px-1 py-1 text-center w-10 min-w-[2.5rem] bg-slate-200/60"
+                    >
+                      <div className="text-[10px] font-semibold text-slate-600">
+                        {s.label}
+                      </div>
+                      <div className="text-[8px] text-slate-500">
+                        {formatHM(s.wallStart)}
+                        <br />~{formatHM(s.wallEnd)}
+                      </div>
+                    </th>
+                  );
+                }
+                return (
+                  <th
+                    key={`w-${s.wt}`}
+                    className={cn(
+                      "border-b border-slate-200 px-1 py-1 text-center w-20 min-w-[5rem]",
+                      s.isOT && "bg-rose-50/40",
+                      s.isFirstOT && "border-l-4 border-l-rose-500"
+                    )}
+                  >
+                    <div className="text-[10px] font-medium text-slate-700 leading-tight">
+                      {formatHM(s.wallStart)}
+                      <br />~{formatHM(s.wallEnd)}
+                    </div>
+                    {s.isFirstOT && (
+                      <div className="text-[9px] text-rose-600 font-bold mt-0.5">
+                        잔업 시작
+                      </div>
+                    )}
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -229,19 +258,28 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                       <span className="text-slate-300">—</span>
                     )}
                   </td>
-                  {hourLabels.map((h) => {
-                    const workers = cellWorkers[line]?.[h.wt] ?? [];
+                  {slots.map((s, idx) => {
+                    if (s.type === "break") {
+                      return (
+                        <td
+                          key={`brk-${idx}`}
+                          className="border border-slate-300 bg-slate-200/40 w-10 min-w-[2.5rem]"
+                          title={`${s.label} 휴게 ${formatHM(s.wallStart)}~${formatHM(s.wallEnd)}`}
+                        />
+                      );
+                    }
+                    const workers = cellWorkers[line]?.[s.wt] ?? [];
                     return (
                       <td
-                        key={h.wt}
+                        key={`w-${s.wt}`}
                         onDragOver={handleDragOver}
-                        onDrop={(e) => handleDrop(e, line, h.wt)}
+                        onDrop={(e) => handleDrop(e, line, s.wt)}
                         className={cn(
-                          "border border-slate-200 p-0.5 align-top min-h-[3rem] h-12",
-                          h.wt === STANDARD_WORKTIME &&
-                            "border-l-2 border-l-rose-300",
-                          h.isOT && "bg-rose-50/20"
+                          "border border-slate-200 p-0.5 align-top h-12",
+                          s.isFirstOT && "border-l-4 border-l-rose-500",
+                          s.isOT && "bg-rose-50/20"
                         )}
+                        title={`${formatHM(s.wallStart)}~${formatHM(s.wallEnd)} ${s.isOT ? "(잔업)" : ""}`}
                       >
                         <div className="flex flex-wrap gap-0.5">
                           {workers.map((w) => (
