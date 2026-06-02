@@ -49,8 +49,10 @@ export function NamedReallocationPlan({
     [result.moves]
   );
 
-  // 시간순 작업자 스냅샷 + 이동별 배정 추적
-  const { snapshots, moveAssignments } = useMemo(() => {
+  // 시간순 작업자 스냅샷 + 이동별 배정 추적 (2-pass: override 먼저 적용 후 나머지)
+  // preTimeSourceWorkers[moveIdx] = 이 시각·출발 라인의 이동 처리 전 원본 작업자 목록
+  // (팝업 후보 목록으로 사용 — 같은 시각 다른 이동에 빠지기 전 상태)
+  const { snapshots, moveAssignments, preTimeSourceWorkers, moveIndexInSorted } = useMemo(() => {
     const current: Record<string, string[]> = {};
     for (const k of Object.keys(lineWorkers)) current[k] = [...lineWorkers[k]];
     for (const t of result.timelines) {
@@ -61,42 +63,77 @@ export function NamedReallocationPlan({
     for (const k of Object.keys(current)) {
       out[k] = [{ time: 0, workers: [...current[k]] }];
     }
-    // moveAssignments[moveIdx] = [작업자명 슬롯 0, 슬롯 1, ...]
     const assignments: string[][] = [];
+    const preSrc: Record<number, string[]> = {};
+    const moveIndex: Record<number, number> = {}; // 정렬된 인덱스 매핑 (sortedMoves index)
 
-    const byTime = new Map<number, typeof sortedMoves>();
-    for (const m of sortedMoves) {
+    const byTime = new Map<number, { m: (typeof sortedMoves)[number]; mi: number }[]>();
+    sortedMoves.forEach((m, idx) => {
       const arr = byTime.get(m.time) ?? [];
-      arr.push(m);
+      arr.push({ m, mi: idx });
       byTime.set(m.time, arr);
-    }
+    });
     const times = Array.from(byTime.keys()).sort((a, b) => a - b);
-    let mi = 0;
+
     for (const t of times) {
-      const ms = byTime.get(t)!;
-      for (const m of ms) {
-        const slots: string[] = [];
+      const movesAtT = byTime.get(t)!;
+      // 1) 이 시각의 모든 출발 라인의 사전 상태 저장 (팝업 후보용)
+      const fromLines = new Set(movesAtT.map(({ m }) => m.from));
+      const preState: Record<string, string[]> = {};
+      for (const L of fromLines) preState[L] = [...(current[L] ?? [])];
+      for (const { m, mi } of movesAtT) {
+        preSrc[mi] = [...preState[m.from]];
+        moveIndex[mi] = mi;
+      }
+
+      // 2) Pass 1: override 가 있고 출발 라인 원본에 존재하는 슬롯부터 처리
+      const slotAssignments: Record<number, string[]> = {};
+      for (const { m, mi } of movesAtT) slotAssignments[mi] = Array(m.count).fill("");
+
+      for (const { m, mi } of movesAtT) {
         for (let si = 0; si < m.count; si++) {
           const key = `${mi}-${si}`;
           const ov = overrides[key];
+          if (
+            ov &&
+            (current[m.from] ?? []).includes(ov) &&
+            // 같은 이동 내 다른 슬롯이 이미 같은 사람을 가져가지 않았는지 (중복 방지)
+            !slotAssignments[mi].includes(ov)
+          ) {
+            slotAssignments[mi][si] = ov;
+            current[m.from] = (current[m.from] ?? []).filter((w) => w !== ov);
+            current[m.to] = [...(current[m.to] ?? []), ov];
+          }
+        }
+      }
+
+      // 3) Pass 2: override 없는(또는 실패한) 슬롯에 남은 작업자 중 첫 번째 배정
+      for (const { m, mi } of movesAtT) {
+        for (let si = 0; si < m.count; si++) {
+          if (slotAssignments[mi][si]) continue;
           const fromList = current[m.from] ?? [];
-          const worker =
-            ov && fromList.includes(ov) ? ov : fromList[0] ?? "";
-          slots.push(worker);
+          const worker = fromList[0] ?? "";
           if (worker) {
+            slotAssignments[mi][si] = worker;
             current[m.from] = fromList.filter((w) => w !== worker);
             current[m.to] = [...(current[m.to] ?? []), worker];
           }
         }
-        assignments[mi] = slots;
-        mi++;
+        assignments[mi] = slotAssignments[mi];
       }
+
+      // 4) 시간 T 끝 — 스냅샷 저장
       for (const k of Object.keys(current)) {
         if (!out[k]) out[k] = [];
         out[k].push({ time: t, workers: [...current[k]] });
       }
     }
-    return { snapshots: out, moveAssignments: assignments };
+    return {
+      snapshots: out,
+      moveAssignments: assignments,
+      preTimeSourceWorkers: preSrc,
+      moveIndexInSorted: moveIndex,
+    };
   }, [sortedMoves, lineWorkers, overrides, result.timelines]);
 
   const workersAt = (line: string, time: number): string[] => {
@@ -378,8 +415,12 @@ export function NamedReallocationPlan({
       {/* 이동 지정 팝업 */}
       {pillModal &&
         (() => {
-          const sourceWorkers = workersAt(pillModal.from, pillModal.time);
-          // 이 이동에서 다른 슬롯에 이미 지정된 작업자 (중복 방지)
+          // 후보 목록 = 이 시각의 이동들이 처리되기 전 출발 라인 원본 명단
+          // (같은 시각 다른 이동에서 빠진 후가 아니라, '14:30 시점 PA-04' 원본)
+          const sourceWorkers =
+            preTimeSourceWorkers[pillModal.moveIdx] ??
+            workersAt(pillModal.from, pillModal.time);
+          // 이 이동에서 다른 슬롯에 이미 지정된 작업자 (한 이동 내 중복 방지)
           const otherSlotsPicked = (curSlot: number) =>
             Array.from({ length: pillModal.count })
               .map((_, i) =>
@@ -389,10 +430,10 @@ export function NamedReallocationPlan({
               )
               .filter((x): x is string => !!x);
 
-          // 기본값: 슬롯 i 의 i 번째 작업자 (override 없을 때)
+          // 기본값: override 가 있으면 그 사람, 없으면 실제 배정된 사람 (2-pass 결과)
           const defaultForSlot = (i: number) =>
             overrides[`${pillModal.moveIdx}-${i}`] ??
-            sourceWorkers[i] ??
+            (moveAssignments[pillModal.moveIdx] ?? [])[i] ??
             sourceWorkers[0] ??
             "";
 

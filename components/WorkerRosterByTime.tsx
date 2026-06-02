@@ -31,7 +31,7 @@ export function WorkerRosterByTime({
     [result.moves]
   );
 
-  // 이벤트 시각 → 그 시각 직후의 라인별 작업자 상태
+  // 이벤트 시각 → 그 시각 직후의 라인별 작업자 상태 (2-pass: override 먼저 적용)
   const snapshotsByTime = useMemo(() => {
     const current: Record<string, string[]> = {};
     for (const k of Object.keys(lineWorkers)) current[k] = [...lineWorkers[k]];
@@ -40,32 +40,52 @@ export function WorkerRosterByTime({
     }
 
     const snaps = new Map<number, Record<string, string[]>>();
-    // 초기 상태 (time=0)
     snaps.set(0, JSON.parse(JSON.stringify(current)));
 
-    const byTime = new Map<number, typeof sortedMoves>();
-    for (const m of sortedMoves) {
+    const byTime = new Map<
+      number,
+      { m: (typeof sortedMoves)[number]; mi: number }[]
+    >();
+    sortedMoves.forEach((m, idx) => {
       const arr = byTime.get(m.time) ?? [];
-      arr.push(m);
+      arr.push({ m, mi: idx });
       byTime.set(m.time, arr);
-    }
+    });
     const times = Array.from(byTime.keys()).sort((a, b) => a - b);
-    let mi = 0;
+
     for (const t of times) {
-      const ms = byTime.get(t)!;
-      for (const m of ms) {
+      const movesAtT = byTime.get(t)!;
+      const slotAssignments: Record<number, string[]> = {};
+      for (const { m, mi } of movesAtT)
+        slotAssignments[mi] = Array(m.count).fill("");
+
+      // Pass 1: override 적용
+      for (const { m, mi } of movesAtT) {
         for (let si = 0; si < m.count; si++) {
           const key = `${mi}-${si}`;
           const ov = overrides[key];
+          if (
+            ov &&
+            (current[m.from] ?? []).includes(ov) &&
+            !slotAssignments[mi].includes(ov)
+          ) {
+            slotAssignments[mi][si] = ov;
+            current[m.from] = (current[m.from] ?? []).filter((w) => w !== ov);
+            current[m.to] = [...(current[m.to] ?? []), ov];
+          }
+        }
+      }
+      // Pass 2: 나머지 슬롯
+      for (const { m, mi } of movesAtT) {
+        for (let si = 0; si < m.count; si++) {
+          if (slotAssignments[mi][si]) continue;
           const fromList = current[m.from] ?? [];
-          const worker =
-            ov && fromList.includes(ov) ? ov : fromList[0] ?? null;
+          const worker = fromList[0] ?? "";
           if (worker) {
             current[m.from] = fromList.filter((w) => w !== worker);
             current[m.to] = [...(current[m.to] ?? []), worker];
           }
         }
-        mi++;
       }
       snaps.set(t, JSON.parse(JSON.stringify(current)));
     }
