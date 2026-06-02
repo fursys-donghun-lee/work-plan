@@ -8,6 +8,7 @@ import { useHydrated } from "@/components/useComputed";
 import { EmptyState } from "@/components/EmptyState";
 import { ReallocationPlan } from "@/components/ReallocationPlan";
 import { NamedMovesPanel } from "@/components/NamedMovesPanel";
+import { NamedReallocationPlan } from "@/components/NamedReallocationPlan";
 import { useDaerimRealloc } from "@/components/useDaerimRealloc";
 import {
   computeReallocation,
@@ -24,6 +25,8 @@ export function DaerimPlanView() {
   const workDate = useDataStore((s) => s.workDate);
   const { groups, extraFree, missing, lineWorkers } = useDaerimRealloc();
   const [tab, setTab] = useState<"count" | "named">("count");
+  // 이름 지정 탭의 이동 override 상태 — 간트 클릭과 패널 드롭다운이 공유
+  const [overrides, setOverrides] = useState<Record<string, string>>({});
 
   // 기본 배치 vs 재배치 결과 → 개선 효과(델타) 계산
   const rBasic = useMemo(
@@ -123,14 +126,19 @@ export function DaerimPlanView() {
         </>
       ) : (
         <>
-          {/* 이름 지정 view — 재배치 간트 + 이름 지정 이동 명단 */}
-          <ReallocationPlan
-            groups={groups}
-            extraFree={extraFree}
-            title="재배치 로직 (간트)"
-            defaultOpen
+          {/* 이름 지정 view — 작업자명이 보이는 간트 + 클릭 이동 명령 */}
+          <NamedReallocationPlan
+            result={rReal}
+            lineWorkers={lineWorkers}
+            overrides={overrides}
+            setOverrides={setOverrides}
           />
-          <NamedMovesPanel result={rReal} lineWorkers={lineWorkers} />
+          <NamedMovesPanel
+            result={rReal}
+            lineWorkers={lineWorkers}
+            overrides={overrides}
+            setOverrides={setOverrides}
+          />
         </>
       )}
     </div>

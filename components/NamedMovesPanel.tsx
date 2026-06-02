@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useMemo } from "react";
 import {
   formatHM,
   workTimeToWall,
@@ -11,13 +11,13 @@ import { ArrowRight, User } from "lucide-react";
 interface Props {
   result: ReallocResult;
   lineWorkers: Record<string, string[]>; // 초기 라인별 작업자 이름
+  overrides: Record<string, string>;
+  setOverrides: (next: Record<string, string>) => void;
 }
 
 // 이름 지정 이동 명단 — 시뮬레이션 이동(인원수 단위)을 시간순으로 풀어
 // "누가" 이동할지 작업자명으로 표시 + 사용자가 드롭다운으로 선택 변경 가능
-export function NamedMovesPanel({ result, lineWorkers }: Props) {
-  // 각 이동 슬롯의 사용자 지정 (override) — key: `${moveIdx}-${slotIdx}` → 작업자명
-  const [overrides, setOverrides] = useState<Record<string, string>>({});
+export function NamedMovesPanel({ result, lineWorkers, overrides, setOverrides }: Props) {
 
   // 이동 순서대로 walk하면서 현재 라인 작업자 상태 갱신 + 각 슬롯의 출발 라인 후보 결정
   const assignments = useMemo(() => {
@@ -126,10 +126,10 @@ export function NamedMovesPanel({ result, lineWorkers }: Props) {
                       <select
                         value={a.assigned}
                         onChange={(e) =>
-                          setOverrides((prev) => ({
-                            ...prev,
+                          setOverrides({
+                            ...overrides,
                             [key]: e.target.value,
-                          }))
+                          })
                         }
                         className="text-sm font-bold text-blue-700 bg-white border border-slate-300 rounded px-2 py-0.5"
                       >
