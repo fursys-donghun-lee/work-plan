@@ -72,7 +72,11 @@ export function ReallocationPlan({
   const pct = (wall: number) => ((wall - AXIS_START) / span) * 100;
 
   // 시간 블록 경계 + 휴게 구간
-  const BLOCK_TICKS = [8.5, 10.5, 12.5, 13.5, 15.5, 17.5, 18.0, 21.0];
+  // 1시간 단위 시각 라벨 (점심 12:30/13:30, 저녁 17:30/18:00 경계 포함)
+  const BLOCK_TICKS = [
+    8.5, 9.5, 10.5, 11.5, 12.5, 13.5, 14.5, 15.5, 16.5, 17.5, 18.0, 19.0,
+    20.0, 21.0,
+  ];
   const BREAK_BANDS = [
     { start: 12.5, end: 13.5 }, // 점심
     { start: 17.5, end: 18.0 }, // 저녁
@@ -257,19 +261,15 @@ export function ReallocationPlan({
                     <div className="flex-1 relative h-10 bg-slate-50 rounded overflow-hidden">
                       {/* 휴게 음영 + 블록 경계선 (배경) */}
                       {trackBackground}
-                      {/* 유휴(노는 시간) — 사람이 투입되지 않은 구간을 연한 빨강으로
-                          · 정규시간 내 미투입 (작업 전 대기 · 종료 후)
-                          · 잔업에 들어간 라인은 21:00까지 비는 시간도 유휴
-                          · 부하 자체가 없는 라인은 유휴 표시 안 함 (작업 대상 아님) */}
-                      {t.loadHours <= 0.01 ? null : (() => {
+                      {/* 작업없음 영역 — 라인에 사람이 투입되지 않은 모든 구간을
+                          하얀 배경 + '작업없음' 텍스트로 표시 (유휴·작업 전·작업 후·부하 없음 통일) */}
+                      {(() => {
                         const REG = STANDARD_WORKTIME; // 정규 8h
-                        // 잔업까지 일한 라인이면 21:00(MAX_WORKTIME)까지, 아니면 17:30까지를 대상
                         const maxEnd = t.segments.reduce(
                           (mx, s) => (s.base + s.added > 0 ? Math.max(mx, s.end) : mx),
                           0
                         );
                         const limit = maxEnd > REG + 1e-9 ? MAX_WORKTIME : REG;
-                        // 사람이 투입된 구간을 모아 그 보색(=유휴 갭) 계산
                         const staffed = t.segments
                           .filter((s) => s.base + s.added > 0)
                           .map((s) => ({
@@ -286,42 +286,24 @@ export function ReallocationPlan({
                           cur = Math.max(cur, s.end);
                         }
                         if (cur < limit - 1e-9) gaps.push({ start: cur, end: limit });
-                        return gaps.flatMap((gp, gi) => {
-                          // 이 갭이 '인원 이동(재배치)'으로 비었는지 — 갭 시작 시점에 이 라인에서 나간 이동이 있으면 이동
-                          const movedOut = result.moves.some(
-                            (m) =>
-                              m.from === t.name &&
-                              m.time >= gp.start - 1e-6 &&
-                              m.time < gp.end - 1e-6
-                          );
-                          return splitWorkSegment(gp.start, gp.end).map((w, wi) =>
-                            movedOut ? (
-                              // 재배치로 비운 구간: 빨강 대신 비우고 이동 표시
+                        return gaps.flatMap((gp, gi) =>
+                          splitWorkSegment(gp.start, gp.end).map((w, wi) => {
+                            const widthPct = pct(w.end) - pct(w.start);
+                            return (
                               <div
-                                key={`mv-${gi}-${wi}`}
-                                className="absolute top-0 bottom-0 flex items-center justify-center"
+                                key={`none-${gi}-${wi}`}
+                                className="absolute top-0 bottom-0 bg-white border border-slate-200 flex items-center justify-center text-[10px] text-slate-400 whitespace-nowrap overflow-hidden"
                                 style={{
                                   left: `${pct(w.start)}%`,
-                                  width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
+                                  width: `${Math.max(widthPct, 0)}%`,
                                 }}
-                                title={`${formatHM(w.start)}~${formatHM(w.end)} · 인원 재배치(다른 라인으로 이동)`}
+                                title={`${formatHM(w.start)}~${formatHM(w.end)} · 작업없음`}
                               >
-                                <ArrowRight className="w-3 h-3 text-slate-300" />
+                                {widthPct >= 6 ? "작업없음" : ""}
                               </div>
-                            ) : (
-                              // 진짜 유휴(노는 시간): 연한 빨강
-                              <div
-                                key={`idle-${gi}-${wi}`}
-                                className="absolute top-0 bottom-0 bg-rose-400/55"
-                                style={{
-                                  left: `${pct(w.start)}%`,
-                                  width: `${Math.max(pct(w.end) - pct(w.start), 0)}%`,
-                                }}
-                                title={`유휴 ${formatHM(w.start)}~${formatHM(w.end)} (작업 없음)`}
-                              />
-                            )
-                          );
-                        });
+                            );
+                          })
+                        );
                       })()}
                       {/* 작업 막대 — 이동 인원 포함 시 연한 노랑, 아니면 파랑 (1명도 작업으로 표시) */}
                       {t.segments.flatMap((seg, si) => {
@@ -369,30 +351,22 @@ export function ReallocationPlan({
                                 (s, m) => s + m.count,
                                 0
                               );
+                              void total;
                               return (
                                 <div
                                   key={`out-${time}`}
-                                  className="absolute top-1/2 -translate-y-1/2 pointer-events-none flex items-center gap-1 z-10"
+                                  className="absolute top-1/2 -translate-y-1/2 pointer-events-none flex flex-col gap-0.5 z-10"
                                   style={{ left: `${xPct}%`, paddingLeft: 4 }}
                                   title={`${formatHM(workTimeToWall(time))} · ${t.name} → ${ms.map((m) => `${m.to}(${m.count})`).join(", ")}`}
                                 >
-                                  <span className="text-orange-600 text-base font-black leading-none drop-shadow-sm">
-                                    ⇨
-                                  </span>
-                                  <div className="flex flex-col gap-0.5">
-                                    {ms.map((m, i) => (
-                                      <span
-                                        key={i}
-                                        className="text-[11px] font-bold leading-none px-1.5 py-0.5 rounded bg-orange-500 text-white shadow whitespace-nowrap"
-                                      >
-                                        {m.to} {m.count}명
-                                      </span>
-                                    ))}
-                                  </div>
-                                  {/* 총 이동 인원 (한 번의 이동에 다수면 좌측 굵은 카운트로 강조) */}
-                                  {ms.length > 1 && (
-                                    <span className="sr-only">총 {total}명</span>
-                                  )}
+                                  {ms.map((m, i) => (
+                                    <span
+                                      key={i}
+                                      className="text-[11px] font-bold leading-tight px-2 py-1 rounded bg-orange-500 text-white shadow whitespace-nowrap"
+                                    >
+                                      {m.to}으로 {m.count}명 이동시킬 것
+                                    </span>
+                                  ))}
                                 </div>
                               );
                             }
@@ -430,20 +404,15 @@ export function ReallocationPlan({
                 이동 인원 포함
               </span>
               <span className="inline-flex items-center gap-1">
-                <span className="w-3 h-3 rounded bg-rose-400/55 inline-block" />
-                유휴(작업 없음)
+                <span className="w-3 h-3 rounded bg-white border border-slate-200 inline-block" />
+                작업없음 (유휴 · 작업 전후)
               </span>
               {!disableRealloc && (
                 <span className="inline-flex items-center gap-1">
-                  <span className="text-orange-600 text-base font-black leading-none">
-                    ⇨
-                  </span>
                   <span className="text-[10px] font-bold leading-none px-1.5 py-0.5 rounded bg-orange-500 text-white">
-                    이동
+                    OO으로 N명 이동시킬 것
                   </span>
-                  <span className="text-slate-500">
-                    = 이동 시각 · 출발 라인 → 도착 라인 N명
-                  </span>
+                  <span className="text-slate-500">= 인원 이동 지시</span>
                 </span>
               )}
               <span className="inline-flex items-center gap-1">

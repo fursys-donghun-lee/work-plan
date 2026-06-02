@@ -178,7 +178,7 @@ export function computeReallocation(
   disableRealloc = false // true 면 기본 배치(이동 없음)로 계산
 ): ReallocResult {
   const standardEnd = startTime + standardHours;
-  const STEP = 0.5; // 30분 단위 시뮬레이션
+  const STEP = 1; // 1시간 단위 시뮬레이션 (인원 이동도 1시간 단위)
 
   interface G {
     name: string;
