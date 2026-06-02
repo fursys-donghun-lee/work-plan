@@ -329,15 +329,14 @@ export function computeReallocation(
     for (let i = 0; i < ef.count; i++) freePool.push({ origin: ef.origin });
   }
 
-  // 한 라인 최대 2명(짝) → 초과 인원만 여유 풀로 (짝은 유지)
+  // 아침 짝 우선 재배치 — 모든 비자동 인원을 풀에 모아 우선순위 라인부터 2명 짝 배정
+  //  · 출근으로 분산된 1명 라인들을 재구성: 우선순위 높은 라인 2명, 낮은 라인은 비워두고 대기
+  //  · 자기 라인 복귀는 ownIdx 로 base 로 복원되므로 불필요한 이동 표시 없음
   for (const g of gs) {
     if (g.autoManaged) continue;
-    if (g.base > MAX_HEADCOUNT) {
-      const excess = g.base - MAX_HEADCOUNT;
-      for (let i = 0; i < excess; i++) freePool.push({ origin: g.name });
-      g.base = MAX_HEADCOUNT;
-      g.segBase = MAX_HEADCOUNT;
-    }
+    for (let i = 0; i < g.base; i++) freePool.push({ origin: g.name });
+    g.base = 0;
+    g.segBase = 0;
   }
 
   // 무부하 일반 그룹 인원 → 즉시 여유 풀
@@ -360,9 +359,14 @@ export function computeReallocation(
   const bottleneck = (a: G, b: G) => {
     const fa = projectedFinish(a);
     const fb = projectedFinish(b);
+    // 둘 다 Infinity(0명)면 동률 → 긴급·부하 큰 라인 우선
+    if (fa === Infinity && fb === Infinity) {
+      if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
+      return b.remaining - a.remaining;
+    }
     if (Math.abs(fa - fb) > EPS) return fb - fa;
     if (a.urgent !== b.urgent) return a.urgent ? -1 : 1;
-    return 0;
+    return b.remaining - a.remaining;
   };
 
   let guard = 0;
@@ -420,19 +424,21 @@ export function computeReallocation(
       });
       if (candidates.length === 0) break;
 
-      // 배치 우선순위 (짝 우선):
-      //  1) 긴급라인(2명 미만)  2) 인원 0명 라인 먼저 가동(라인 안 죽게)
-      //  3) 1명 라인 짝짓기(2명)  4) 그 외 병목
+      // 배치 우선순위 (짝 우선·집중 작업):
+      //  1) 긴급라인(2명 미만)
+      //  2) 1명 라인 짝짓기(솔로 → 2명) — 이미 가동 중 라인부터 짝 완성
+      //  3) 0명 라인 가동 — 짝지을 솔로 없으면 새 라인 시작
+      //  4) 그 외 병목
       let target: G;
       const urgentNeed = candidates
         .filter((g) => g.urgent && hc(g) < URGENT_MIN_HEADCOUNT)
         .sort((a, b) => hc(a) - hc(b) || bottleneck(a, b));
-      const zeroLines = candidates.filter((g) => hc(g) === 0).sort(bottleneck);
       const soloLines = candidates.filter((g) => hc(g) === 1).sort(bottleneck);
+      const zeroLines = candidates.filter((g) => hc(g) === 0).sort(bottleneck);
 
       if (urgentNeed.length > 0) target = urgentNeed[0];
-      else if (zeroLines.length > 0) target = zeroLines[0];
       else if (soloLines.length > 0) target = soloLines[0];
+      else if (zeroLines.length > 0) target = zeroLines[0];
       else target = [...candidates].sort(bottleneck)[0];
 
       // 타깃이 출발 라인인 인원이 풀에 있으면 그를 복귀(기존 인원)시켜 자기 라인 이동 표시 방지
