@@ -323,6 +323,29 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     return c;
   }, [tracking, lineNames]);
 
+  // 행 정렬: 인원여유(0) → 인원배정필요(1) → 기타(2), 각 그룹 내 이름 오름차순
+  const displayLines = useMemo(() => {
+    const priority = (line: string): number => {
+      const load = loadByLine[line] ?? 0;
+      const done = consumed[line] ?? 0;
+      const isAuto = lineMeta[line]?.autoManaged ?? false;
+      if (isAuto) return 2;
+      let maxHc = 0;
+      for (let h = 0; h < HOUR_COUNT; h++) {
+        maxHc = Math.max(maxHc, (cellWorkers[line]?.[h] ?? []).length);
+      }
+      if (maxHc > 0 && (load <= 0.01 || done >= load + 1)) return 0; // 인원여유
+      if (load > 0.01 && done < load - 0.01 && maxHc < 2) return 1; // 인원배정필요
+      return 2;
+    };
+    return [...lineNames].sort((a, b) => {
+      const pa = priority(a);
+      const pb = priority(b);
+      if (pa !== pb) return pa - pb;
+      return a.localeCompare(b);
+    });
+  }, [lineNames, loadByLine, consumed, cellWorkers, lineMeta]);
+
   // 드래그 핸들러
   const [dragging, setDragging] = useState<string | null>(null);
 
@@ -462,7 +485,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
             </tr>
           </thead>
           <tbody>
-            {lineNames.map((line) => {
+            {displayLines.map((line) => {
               const load = loadByLine[line] ?? 0;
               const done = consumed[line] ?? 0;
               const isAuto = result.timelines.find((t) => t.name === line)
@@ -488,20 +511,17 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
               };
               let statusBadge: StatusBadge | null = null;
               if (!isAuto) {
-                if (load > 0.01 && done < load - 0.01) {
-                  if (maxHcInLoad >= 2) {
-                    statusBadge = {
-                      text: "임시셀구성필요",
-                      tone: "amber",
-                      title: `부하 ${load.toFixed(1)}인시 중 ${done.toFixed(1)}인시 처리 — 이미 2명 짝 — 잔여 ${(load - done).toFixed(1)}인시는 임시셀 필요`,
-                    };
-                  } else {
-                    statusBadge = {
-                      text: "인원배정필요",
-                      tone: "rose",
-                      title: `부하 ${load.toFixed(1)}인시 중 ${done.toFixed(1)}인시 처리 — 추가 ${(load - done).toFixed(1)}인시 필요`,
-                    };
-                  }
+                if (
+                  load > 0.01 &&
+                  done < load - 0.01 &&
+                  maxHcInLoad < 2
+                ) {
+                  // 부족 + 짝 미완성만 → 인원배정필요 (2명 짝 차있으면 배지 미표시)
+                  statusBadge = {
+                    text: "인원배정필요",
+                    tone: "rose",
+                    title: `부하 ${load.toFixed(1)}인시 중 ${done.toFixed(1)}인시 처리 — 추가 ${(load - done).toFixed(1)}인시 필요`,
+                  };
                 } else if (
                   maxHcInLoad > 0 &&
                   (load <= 0.01 || done >= load + 1)
