@@ -44,20 +44,33 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   const [assignments, setAssignments] =
     useState<Record<string, string[]>>(initialAssignments);
 
+  // 확정/잠금 상태 — 확정 시 현재 assignments 를 스냅샷, 다시 누르면 해제
+  const [confirmed, setConfirmed] = useState<Record<string, string[]> | null>(
+    null
+  );
+  const [locked, setLocked] = useState(false);
+  const [viewingConfirmed, setViewingConfirmed] = useState(false);
+
+  // 화면에 표시할 데이터 source — 확정 계획 보기 중이면 스냅샷
+  const displayAssignments =
+    viewingConfirmed && confirmed ? confirmed : assignments;
+
+  const readOnly = locked || viewingConfirmed;
+
   // 입력 순서의 라인 이름 (계산용 — sort 전 단계)
   const lineNames = useMemo(
     () => result.timelines.map((t) => t.name),
     [result.timelines]
   );
 
-  // 라인별·시간별 현재 작업자
+  // 라인별·시간별 현재 작업자 (확정 보기 중이면 스냅샷 기준)
   const cellWorkers = useMemo(() => {
     const m: Record<string, string[][]> = {};
     for (const line of lineNames) {
       m[line] = Array.from({ length: HOUR_COUNT }, () => [] as string[]);
     }
-    for (const w of Object.keys(assignments)) {
-      const arr = assignments[w];
+    for (const w of Object.keys(displayAssignments)) {
+      const arr = displayAssignments[w];
       for (let h = 0; h < HOUR_COUNT; h++) {
         const line = arr[h];
         if (!line) continue;
@@ -66,7 +79,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       }
     }
     return m;
-  }, [assignments, lineNames]);
+  }, [displayAssignments, lineNames]);
 
   // 라인 부하 lookup
   const loadByLine = useMemo(() => {
@@ -346,12 +359,15 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     });
   }, [lineNames, loadByLine, consumed, cellWorkers, lineMeta]);
 
-  // 잔업 자동 빠짐 — 배치된 인원이 실제로 작업할 시간이 < 2h 이면 잔업 셀에서 제거
+  // 잔업 자동 빠짐 — 확정/보기 중에는 실행하지 않음
+  // (readOnly 라도 effect 는 등록, 내부에서 가드)
+  // 배치된 인원이 실제로 작업할 시간이 < 2h 이면 잔업 셀에서 제거
   // 기준: 잔여부하(carry) / 잔업 최대 hc 의 rate = 실제 작업해야 할 wall-time
   //   ex) carry 3인시 + 2명 (rate 2) → 1.5h < 2h → 빠짐
   //   ex) carry 5인시 + 2명 (rate 2) → 2.5h ≥ 2h → 유지
   //   ex) carry 0인시 (정규시간에 모두 처리됨) → 무조건 빠짐
   useEffect(() => {
+    if (readOnly) return;
     const toClear: { worker: string; hours: number[] }[] = [];
     for (const line of lineNames) {
       const isAuto = lineMeta[line]?.autoManaged ?? false;
@@ -393,12 +409,16 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       }
       return next;
     });
-  }, [cellWorkers, lineNames, lineMeta, loadByLine]);
+  }, [cellWorkers, lineNames, lineMeta, loadByLine, readOnly]);
 
   // 드래그 핸들러
   const [dragging, setDragging] = useState<string | null>(null);
 
   const handleDragStart = (e: React.DragEvent, worker: string) => {
+    if (readOnly) {
+      e.preventDefault();
+      return;
+    }
     e.dataTransfer.setData("text/plain", worker);
     e.dataTransfer.effectAllowed = "move";
     setDragging(worker);
@@ -418,6 +438,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     destHour: number
   ) => {
     e.preventDefault();
+    if (readOnly) return;
     const worker = e.dataTransfer.getData("text/plain");
     if (!worker) return;
     setAssignments((prev) => {
@@ -433,7 +454,26 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   };
 
   // 초기화
-  const handleReset = () => setAssignments(initialAssignments);
+  const handleReset = () => {
+    if (readOnly) return;
+    setAssignments(initialAssignments);
+  };
+
+  // 확정 토글 — 잠금이 풀려있으면 현재 assignments 를 스냅샷+잠금, 잠금이면 해제
+  const handleConfirmToggle = () => {
+    if (locked) {
+      setLocked(false);
+    } else {
+      setConfirmed(JSON.parse(JSON.stringify(assignments)));
+      setLocked(true);
+    }
+  };
+
+  // 확정 계획 보기 토글
+  const handleViewConfirmedToggle = () => {
+    if (!confirmed) return;
+    setViewingConfirmed((v) => !v);
+  };
 
   // 화면 표시용 라인 이름 (자동포장라인 → 자동포장)
   const displayName = (line: string) =>
@@ -472,16 +512,59 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
         <h2 className="font-semibold text-slate-900">
           수동 배치 (드래그앤드롭)
           <span className="ml-2 text-xs font-normal text-slate-500">
-            작업자 칩을 다른 라인·시간으로 드래그해서 직접 배치
+            {viewingConfirmed
+              ? "확정 계획 보는 중 (읽기 전용)"
+              : locked
+                ? "확정 — 잠금 상태 (편집 불가)"
+                : "작업자 칩을 다른 라인·시간으로 드래그해서 직접 배치"}
           </span>
         </h2>
-        <button
-          type="button"
-          onClick={handleReset}
-          className="text-xs px-3 py-1.5 border border-slate-300 hover:bg-slate-50 rounded"
-        >
-          출근 위치로 초기화
-        </button>
+        <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleReset}
+            disabled={readOnly}
+            className="text-xs px-3 py-1.5 border border-slate-300 hover:bg-slate-50 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+          >
+            출근 위치로 초기화
+          </button>
+          <button
+            type="button"
+            onClick={handleConfirmToggle}
+            disabled={viewingConfirmed}
+            className={cn(
+              "text-xs px-3 py-1.5 font-semibold rounded disabled:opacity-40 disabled:cursor-not-allowed",
+              locked
+                ? "bg-amber-100 hover:bg-amber-200 text-amber-800 border border-amber-300"
+                : "bg-blue-600 hover:bg-blue-700 text-white border border-blue-600"
+            )}
+            title={
+              locked ? "다시 누르면 잠금 해제" : "현재 배치를 확정 (잠금)"
+            }
+          >
+            {locked ? "확정 해제" : "확정"}
+          </button>
+          <button
+            type="button"
+            onClick={handleViewConfirmedToggle}
+            disabled={!confirmed}
+            className={cn(
+              "text-xs px-3 py-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed",
+              viewingConfirmed
+                ? "bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200"
+                : "border-slate-300 hover:bg-slate-50"
+            )}
+            title={
+              !confirmed
+                ? "확정된 계획이 없습니다 — 먼저 '확정' 을 누르세요"
+                : viewingConfirmed
+                  ? "현재 작업 계획으로 돌아가기"
+                  : "확정한 계획 보기"
+            }
+          >
+            {viewingConfirmed ? "현재 계획 보기" : "확정 계획 보기"}
+          </button>
+        </div>
       </div>
 
       <div>
@@ -708,18 +791,23 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
                           {workers.map((w) => (
                             <div
                               key={w}
-                              draggable
+                              draggable={!readOnly}
                               onDragStart={(e) => handleDragStart(e, w)}
                               onDragEnd={handleDragEnd}
                               className={cn(
-                                "text-[10px] font-bold px-1.5 py-0.5 rounded cursor-move whitespace-nowrap",
+                                "text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap",
+                                readOnly ? "cursor-default" : "cursor-move",
                                 workers.length >= 2
                                   ? "bg-blue-500 text-white"
                                   : "bg-yellow-200 border border-yellow-400 text-slate-800",
                                 dragging === w &&
                                   "ring-2 ring-orange-500 opacity-50"
                               )}
-                              title={`${w} — 드래그해서 다른 라인·시간으로 이동`}
+                              title={
+                                readOnly
+                                  ? w
+                                  : `${w} — 드래그해서 다른 라인·시간으로 이동`
+                              }
                             >
                               {w}
                             </div>
