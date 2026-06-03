@@ -448,9 +448,9 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                             </div>
                           ))}
                         </div>
-                        {/* 완료 표시 (낭비 아닌 경우만) — 진한 emerald 배지 */}
+                        {/* 완료 표시 (낭비 아닌 경우만) */}
                         {isComplete && !wasteful && (
-                          <div className="absolute top-0 right-0 text-[10px] font-extrabold text-white bg-emerald-600 px-1.5 py-0.5 rounded-bl shadow-sm leading-none">
+                          <div className="absolute bottom-0 right-0.5 text-[10px] font-extrabold text-emerald-900 leading-none">
                             ✓ 완료
                           </div>
                         )}
@@ -499,7 +499,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
           부하 영역 (작업 필요 시간)
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="text-[9px] font-extrabold text-white bg-emerald-600 px-1 py-px rounded">
+          <span className="text-[10px] font-extrabold text-emerald-900">
             ✓ 완료
           </span>
         </span>
