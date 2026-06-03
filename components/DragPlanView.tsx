@@ -418,7 +418,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                           inLoadRegion &&
                             !isComplete &&
                             !wasteful &&
-                            "bg-blue-50/70",
+                            "bg-blue-200/70",
                           // 완료 셀
                           isComplete &&
                             !wasteful &&
@@ -496,7 +496,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
           솔로(1명·60%)
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-blue-50/70 border border-slate-300 inline-block" />
+          <span className="w-3 h-3 rounded bg-blue-200/70 border border-slate-300 inline-block" />
           부하 영역 (작업 필요 시간)
         </span>
         <span className="inline-flex items-center gap-1">
