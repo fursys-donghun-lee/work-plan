@@ -241,6 +241,21 @@ export function DragPlanView({ result, lineWorkers }: Props) {
   // 초기화
   const handleReset = () => setAssignments(initialAssignments);
 
+  // 이 라인의 잔업 작업자 모두 빼기 (work-time 8~10 셀에서 해당 라인 제거)
+  const skipOTForLine = (line: string) => {
+    setAssignments((prev) => {
+      const next: Record<string, string[]> = {};
+      for (const w of Object.keys(prev)) {
+        const arr = [...prev[w]];
+        for (let h = 8; h < HOUR_COUNT; h++) {
+          if (arr[h] === line) arr[h] = "";
+        }
+        next[w] = arr;
+      }
+      return next;
+    });
+  };
+
   // 시간 슬롯 — 근무 셀과 휴게(점심·저녁) 셀이 섞여 있는 시간축
   type Slot =
     | { type: "work"; wt: number; wallStart: number; wallEnd: number; isOT: boolean; isFirstOT: boolean }
@@ -357,6 +372,17 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                       <div className="text-[10px] text-emerald-600 font-normal">
                         자동라인
                       </div>
+                    )}
+                    {/* 잔업 안하기 버튼 — 이 라인에 잔업 셀 작업자가 있을 때만 */}
+                    {!isAuto && (lineOTCellsUsed[line] ?? 0) > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => skipOTForLine(line)}
+                        className="mt-1 text-[9px] font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded whitespace-nowrap"
+                        title="이 라인의 잔업(18:00~21:00) 시간대에 배치된 모든 작업자를 빼기"
+                      >
+                        ✕ 잔업 안하기
+                      </button>
                     )}
                   </th>
                   <td className="border-b border-slate-100 pl-0 pr-1 py-1 text-center align-middle">
