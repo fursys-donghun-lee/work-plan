@@ -50,12 +50,17 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   );
   const [locked, setLocked] = useState(false);
   const [viewingConfirmed, setViewingConfirmed] = useState(false);
+  const [viewingBasic, setViewingBasic] = useState(false);
 
-  // 화면에 표시할 데이터 source — 확정 계획 보기 중이면 스냅샷
+  // 화면에 표시할 데이터 source — 확정/기본 보기 중이면 그 스냅샷
   const displayAssignments =
-    viewingConfirmed && confirmed ? confirmed : assignments;
+    viewingConfirmed && confirmed
+      ? confirmed
+      : viewingBasic
+        ? initialAssignments
+        : assignments;
 
-  const readOnly = locked || viewingConfirmed;
+  const readOnly = locked || viewingConfirmed || viewingBasic;
 
   // 입력 순서의 라인 이름 (계산용 — sort 전 단계)
   const lineNames = useMemo(
@@ -469,10 +474,17 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     }
   };
 
-  // 확정 계획 보기 토글
+  // 확정 계획 보기 토글 (기본 배치 보기는 자동 해제)
   const handleViewConfirmedToggle = () => {
     if (!confirmed) return;
+    setViewingBasic(false);
     setViewingConfirmed((v) => !v);
+  };
+
+  // 기본 배치 보기 토글 (확정 계획 보기는 자동 해제)
+  const handleViewBasicToggle = () => {
+    setViewingConfirmed(false);
+    setViewingBasic((v) => !v);
   };
 
   // 화면 표시용 라인 이름 (자동포장라인 → 자동포장)
@@ -514,9 +526,11 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
           <span className="ml-2 text-xs font-normal text-slate-500">
             {viewingConfirmed
               ? "확정 계획 보는 중 (읽기 전용)"
-              : locked
-                ? "확정 — 잠금 상태 (편집 불가)"
-                : "작업자 칩을 다른 라인·시간으로 드래그해서 직접 배치"}
+              : viewingBasic
+                ? "기본 배치 보는 중 (이동 없음, 읽기 전용)"
+                : locked
+                  ? "확정 — 잠금 상태 (편집 불가)"
+                  : "작업자 칩을 다른 라인·시간으로 드래그해서 직접 배치"}
           </span>
         </h2>
         <div className="flex items-center gap-2">
@@ -531,7 +545,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
           <button
             type="button"
             onClick={handleConfirmToggle}
-            disabled={viewingConfirmed}
+            disabled={viewingConfirmed || viewingBasic}
             className={cn(
               "text-xs px-3 py-1.5 font-semibold rounded disabled:opacity-40 disabled:cursor-not-allowed",
               locked
@@ -547,7 +561,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
           <button
             type="button"
             onClick={handleViewConfirmedToggle}
-            disabled={!confirmed}
+            disabled={!confirmed || viewingBasic}
             className={cn(
               "text-xs px-3 py-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed",
               viewingConfirmed
@@ -563,6 +577,24 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
             }
           >
             {viewingConfirmed ? "현재 계획 보기" : "확정 계획 보기"}
+          </button>
+          <button
+            type="button"
+            onClick={handleViewBasicToggle}
+            disabled={viewingConfirmed}
+            className={cn(
+              "text-xs px-3 py-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed",
+              viewingBasic
+                ? "bg-sky-100 border-sky-300 text-sky-800 hover:bg-sky-200"
+                : "border-slate-300 hover:bg-slate-50"
+            )}
+            title={
+              viewingBasic
+                ? "현재 작업 계획으로 돌아가기"
+                : "이동 없는 출근 위치 그대로의 배치 보기"
+            }
+          >
+            {viewingBasic ? "현재 계획 보기" : "기본 배치 보기"}
           </button>
         </div>
       </div>
