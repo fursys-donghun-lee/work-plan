@@ -106,6 +106,20 @@ export function DragPlanView({ result, lineWorkers }: Props) {
     return m;
   }, [loadByLine, lineNames]);
 
+  // 라인별 잔업 시간(셀 수) — 잔업창에서 작업자가 배치된 셀 수
+  // (잔업 2시간 이하 = 잔업 셀 ≤ 2개 → 낭비, 빠지거나 다른 라인으로)
+  const lineOTCellsUsed = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const line of lineNames) {
+      let cnt = 0;
+      for (let h = 8; h < HOUR_COUNT; h++) {
+        if ((cellWorkers[line]?.[h] ?? []).length > 0) cnt++;
+      }
+      m[line] = cnt;
+    }
+    return m;
+  }, [cellWorkers, lineNames]);
+
   // 라인 메타 조회용 (urgent, autoManaged)
   const lineMeta = useMemo(() => {
     const m: Record<string, { urgent: boolean; autoManaged: boolean }> = {};
@@ -362,9 +376,35 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                     const completion = tr?.completionHour ?? null;
                     const inLoadRegion = s.wt < lr;
                     const isComplete = completion === s.wt;
-                    const isExcess =
-                      completion !== null && s.wt > completion && workers.length > 0;
-                    const suggested = isExcess ? suggestionAt(s.wt) : null;
+                    const lineLoad = loadByLine[line] ?? 0;
+
+                    // === 낭비(이동 가이드) 케이스 판단 ===
+                    let wasteReason:
+                      | "noload"
+                      | "excess"
+                      | "wasteOT"
+                      | null = null;
+                    if (workers.length > 0) {
+                      if (lineLoad <= 0.01) {
+                        // 부하 자체가 없는데 사람 있음 (PA-06 케이스)
+                        wasteReason = "noload";
+                      } else if (
+                        completion !== null &&
+                        s.wt > completion
+                      ) {
+                        // 작업 완료 후 여유
+                        wasteReason = "excess";
+                      } else if (
+                        s.isOT &&
+                        (lineOTCellsUsed[line] ?? 0) > 0 &&
+                        (lineOTCellsUsed[line] ?? 0) <= 2
+                      ) {
+                        // 잔업이 2시간 이하 → 빠지거나 이동
+                        wasteReason = "wasteOT";
+                      }
+                    }
+                    const wasteful = wasteReason !== null;
+                    const suggested = wasteful ? suggestionAt(s.wt) : null;
                     return (
                       <td
                         key={`w-${s.wt}`}
@@ -374,13 +414,17 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                           "border border-slate-200 p-0.5 align-top h-14 relative",
                           s.isFirstOT && "border-l-4 border-l-rose-500",
                           s.isOT && "bg-rose-50/20",
-                          // 부하 영역 배경 (이 라인의 부하만큼 셀에 옅은 파랑)
-                          inLoadRegion && !isComplete && !isExcess && "bg-blue-50/70",
+                          // 부하 영역 배경
+                          inLoadRegion &&
+                            !isComplete &&
+                            !wasteful &&
+                            "bg-blue-50/70",
                           // 완료 셀
                           isComplete &&
+                            !wasteful &&
                             "border-2 border-emerald-500 bg-emerald-50",
-                          // 완료 후 여유 셀
-                          isExcess && "border-2 border-amber-400 bg-amber-50"
+                          // 낭비/이동 가이드 셀
+                          wasteful && "border-2 border-amber-400 bg-amber-50"
                         )}
                         title={`${formatHM(s.wallStart)}~${formatHM(s.wallEnd)} ${s.isOT ? "(잔업)" : ""}`}
                       >
@@ -405,21 +449,29 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                             </div>
                           ))}
                         </div>
-                        {/* 완료 표시 */}
-                        {isComplete && (
+                        {/* 완료 표시 (낭비 아닌 경우만) */}
+                        {isComplete && !wasteful && (
                           <div className="absolute bottom-0 right-0.5 text-[9px] font-bold text-emerald-700 leading-none">
                             ✓ 완료
                           </div>
                         )}
-                        {/* 여유 인원 + 추천 라인 */}
-                        {isExcess && (
+                        {/* 이동 가이드 */}
+                        {wasteful && (
                           <div className="absolute bottom-0 left-0.5 right-0.5 text-[9px] leading-tight">
                             <div className="text-amber-700 font-bold">
-                              여유 {workers.length}명
+                              {wasteReason === "noload"
+                                ? `부하 없음 (${workers.length}명)`
+                                : wasteReason === "wasteOT"
+                                  ? `잔업 ${lineOTCellsUsed[line]}h 짧음`
+                                  : `여유 ${workers.length}명`}
                             </div>
-                            {suggested && (
+                            {suggested ? (
                               <div className="text-blue-700 truncate">
                                 → {suggested}
+                              </div>
+                            ) : (
+                              <div className="text-slate-500 truncate">
+                                → 빠지기
                               </div>
                             )}
                           </div>
