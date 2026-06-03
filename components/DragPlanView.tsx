@@ -96,15 +96,29 @@ export function DragPlanView({ result, lineWorkers }: Props) {
     return out;
   }, [cellWorkers, lineNames, loadByLine]);
 
-  // 라인별 부하 영역 — 2명 짝 기준 필요한 셀 수 (배경 표시용)
-  const loadCellCount = useMemo(() => {
-    const m: Record<string, number> = {};
+  // 라인별 부하 영역 — 첫 작업자 배치 시점부터 2명 짝 기준 필요한 셀 수
+  // (인원이 10:30부터 이동되면 10:30부터 배경 시작)
+  const loadRegion = useMemo(() => {
+    const m: Record<string, { start: number; end: number }> = {};
     for (const line of lineNames) {
       const load = loadByLine[line] ?? 0;
-      m[line] = load > 0.01 ? Math.ceil(load / 2) : 0;
+      if (load <= 0.01) {
+        m[line] = { start: -1, end: -1 };
+        continue;
+      }
+      let firstWorker = -1;
+      for (let h = 0; h < HOUR_COUNT; h++) {
+        if ((cellWorkers[line]?.[h] ?? []).length > 0) {
+          firstWorker = h;
+          break;
+        }
+      }
+      const start = firstWorker >= 0 ? firstWorker : 0;
+      const span = Math.ceil(load / 2);
+      m[line] = { start, end: Math.min(HOUR_COUNT - 1, start + span - 1) };
     }
     return m;
-  }, [loadByLine, lineNames]);
+  }, [loadByLine, lineNames, cellWorkers]);
 
   // 라인별 잔업 시간(셀 수) — 잔업창에서 작업자가 배치된 셀 수
   // (잔업 2시간 이하 = 잔업 셀 ≤ 2개 → 낭비, 빠지거나 다른 라인으로)
@@ -372,9 +386,13 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                     }
                     const workers = cellWorkers[line]?.[s.wt] ?? [];
                     const tr = tracking[line];
-                    const lr = loadCellCount[line] ?? 0;
+                    const region = loadRegion[line];
                     const completion = tr?.completionHour ?? null;
-                    const inLoadRegion = s.wt < lr;
+                    const inLoadRegion =
+                      region !== undefined &&
+                      region.start >= 0 &&
+                      s.wt >= region.start &&
+                      s.wt <= region.end;
                     const isComplete = completion === s.wt;
                     const lineLoad = loadByLine[line] ?? 0;
 
