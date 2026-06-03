@@ -39,7 +39,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
   const [assignments, setAssignments] =
     useState<Record<string, string[]>>(initialAssignments);
 
-  // 모든 라인 이름 (timelines 순서, 자동 포함)
+  // 입력 순서의 라인 이름 (계산용 — sort 전 단계)
   const lineNames = useMemo(
     () => result.timelines.map((t) => t.name),
     [result.timelines]
@@ -142,6 +142,39 @@ export function DragPlanView({ result, lineWorkers }: Props) {
     }
     return m;
   }, [result.timelines]);
+
+  // 라인별로 '인원이동 필요' 여부 — 부하가 남았거나, 어디든 낭비 셀이 있으면 true
+  const needsAction = (line: string): boolean => {
+    const meta = lineMeta[line];
+    if (!meta || meta.autoManaged) return false; // 자동라인은 별도
+    const load = loadByLine[line] ?? 0;
+    const tr = tracking[line];
+    const total = tr?.total ?? 0;
+    // 부하 있는데 완료 못 함
+    if (load > 0.01 && total < load - 0.01) return true;
+    // 어느 셀이라도 낭비 상태(부하 없는데 사람·완료 후 사람·잔업 짧음)
+    for (let h = 0; h < HOUR_COUNT; h++) {
+      const workers = (cellWorkers[line]?.[h] ?? []).length;
+      if (workers === 0) continue;
+      if (load <= 0.01) return true;
+      const completion = tr?.completionHour ?? null;
+      if (completion !== null && h > completion) return true;
+      const cellsInOT = lineOTCellsUsed[line] ?? 0;
+      if (h >= 8 && cellsInOT > 0 && cellsInOT <= 2) return true;
+    }
+    return false;
+  };
+
+  // 표시 순서: 이동 필요 라인 → 위, 그 외 → 아래, 각 그룹 안에서는 이름 오름차순
+  const displayLines = useMemo(() => {
+    return [...lineNames].sort((a, b) => {
+      const aNeed = needsAction(a);
+      const bNeed = needsAction(b);
+      if (aNeed !== bNeed) return aNeed ? -1 : 1;
+      return a.localeCompare(b);
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineNames, cellWorkers, tracking, lineMeta, loadByLine, lineOTCellsUsed]);
 
   // 시각 atHour 에서 추천 도착 라인 — 재배치 알고리즘과 동일 우선순위:
   //  1) 긴급(D-1/D-2) 라인 중 2명 미만 (짝 완성 필요)
@@ -329,7 +362,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
             </tr>
           </thead>
           <tbody>
-            {lineNames.map((line) => {
+            {displayLines.map((line) => {
               const load = loadByLine[line] ?? 0;
               const done = consumed[line] ?? 0;
               const isAuto = result.timelines.find((t) => t.name === line)
