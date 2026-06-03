@@ -286,7 +286,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                 라인
               </th>
               <th className="border-b border-slate-200 px-2 py-1 text-center font-semibold text-slate-600 w-24 min-w-[6rem]">
-                부하/처리
+                처리/부하
               </th>
               {slots.map((s, idx) => {
                 if (s.type === "break") {
