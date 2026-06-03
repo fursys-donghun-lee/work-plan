@@ -143,38 +143,6 @@ export function DragPlanView({ result, lineWorkers }: Props) {
     return m;
   }, [result.timelines]);
 
-  // 라인별로 '인원이동 필요' 여부 — 부하가 남았거나, 어디든 낭비 셀이 있으면 true
-  const needsAction = (line: string): boolean => {
-    const meta = lineMeta[line];
-    if (!meta || meta.autoManaged) return false; // 자동라인은 별도
-    const load = loadByLine[line] ?? 0;
-    const tr = tracking[line];
-    const total = tr?.total ?? 0;
-    // 부하 있는데 완료 못 함
-    if (load > 0.01 && total < load - 0.01) return true;
-    // 어느 셀이라도 낭비 상태(부하 없는데 사람·완료 후 사람·잔업 짧음)
-    for (let h = 0; h < HOUR_COUNT; h++) {
-      const workers = (cellWorkers[line]?.[h] ?? []).length;
-      if (workers === 0) continue;
-      if (load <= 0.01) return true;
-      const completion = tr?.completionHour ?? null;
-      if (completion !== null && h > completion) return true;
-      const cellsInOT = lineOTCellsUsed[line] ?? 0;
-      if (h >= 8 && cellsInOT > 0 && cellsInOT <= 2) return true;
-    }
-    return false;
-  };
-
-  // 표시 순서: 이동 필요 라인 → 위, 그 외 → 아래, 각 그룹 안에서는 이름 오름차순
-  const displayLines = useMemo(() => {
-    return [...lineNames].sort((a, b) => {
-      const aNeed = needsAction(a);
-      const bNeed = needsAction(b);
-      if (aNeed !== bNeed) return aNeed ? -1 : 1;
-      return a.localeCompare(b);
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lineNames, cellWorkers, tracking, lineMeta, loadByLine, lineOTCellsUsed]);
 
   // 시각 atHour 에서 추천 도착 라인 — 재배치 알고리즘과 동일 우선순위:
   //  1) 긴급(D-1/D-2) 라인 중 2명 미만 (짝 완성 필요)
@@ -318,6 +286,9 @@ export function DragPlanView({ result, lineWorkers }: Props) {
               <th className="sticky left-0 bg-white border-b border-slate-200 px-2 py-1 text-left font-semibold text-slate-600 w-32 min-w-[8rem]">
                 라인
               </th>
+              <th className="border-b border-slate-200 px-2 py-1 text-center font-semibold text-slate-600 w-28 min-w-[7rem]">
+                배정 상태
+              </th>
               <th className="border-b border-slate-200 px-2 py-1 text-center font-semibold text-slate-600 w-24 min-w-[6rem]">
                 처리/부하
               </th>
@@ -362,7 +333,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
             </tr>
           </thead>
           <tbody>
-            {displayLines.map((line) => {
+            {lineNames.map((line) => {
               const load = loadByLine[line] ?? 0;
               const done = consumed[line] ?? 0;
               const isAuto = result.timelines.find((t) => t.name === line)
@@ -373,6 +344,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                   : done >= load - 0.01
                     ? `완료 (여유 ${(done - load).toFixed(1)})`
                     : `이월 ${(load - done).toFixed(1)}인시`;
+              const needsMoreWorkers = load > 0.01 && done < load - 0.01;
               return (
                 <tr key={line}>
                   <th className="sticky left-0 bg-white border-b border-slate-100 px-2 py-1 text-left font-medium text-slate-700">
@@ -387,6 +359,18 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                       </div>
                     )}
                   </th>
+                  <td className="border-b border-slate-100 px-1 py-1 text-center align-middle">
+                    {needsMoreWorkers ? (
+                      <span
+                        className="inline-block text-[10px] font-bold text-rose-700 bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded whitespace-nowrap"
+                        title={`부하 ${load.toFixed(1)}인시 중 ${done.toFixed(1)}인시 처리 — 추가 ${(load - done).toFixed(1)}인시 필요`}
+                      >
+                        인원배정필요
+                      </span>
+                    ) : (
+                      <span className="text-slate-300 text-[10px]">—</span>
+                    )}
+                  </td>
                   <td className="border-b border-slate-100 px-2 py-1 text-center text-[11px]">
                     {load > 0.01 ? (
                       <>
