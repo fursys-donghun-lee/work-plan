@@ -323,7 +323,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     return c;
   }, [tracking, lineNames]);
 
-  // 행 정렬: 인원여유(0) → 인원배정필요(1) → 기타(2), 각 그룹 내 이름 오름차순
+  // 행 정렬: 인원배정필요(0) → 인원여유(1) → 기타(2), 각 그룹 내 이름 오름차순
   const displayLines = useMemo(() => {
     const priority = (line: string): number => {
       const load = loadByLine[line] ?? 0;
@@ -334,8 +334,8 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       for (let h = 0; h < HOUR_COUNT; h++) {
         maxHc = Math.max(maxHc, (cellWorkers[line]?.[h] ?? []).length);
       }
-      if (maxHc > 0 && (load <= 0.01 || done >= load + 1)) return 0; // 인원여유
-      if (load > 0.01 && done < load - 0.01 && maxHc < 2) return 1; // 인원배정필요
+      if (load > 0.01 && done < load - 0.01 && maxHc < 2) return 0; // 인원배정필요
+      if (maxHc > 0 && (load <= 0.01 || done >= load + 1)) return 1; // 인원여유
       return 2;
     };
     return [...lineNames].sort((a, b) => {
