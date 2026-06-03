@@ -414,15 +414,14 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                           "border border-slate-200 p-0.5 align-top h-14 relative",
                           s.isFirstOT && "border-l-4 border-l-rose-500",
                           s.isOT && "bg-rose-50/20",
-                          // 부하 영역 배경
-                          inLoadRegion &&
-                            !isComplete &&
+                          // 부하 영역 배경 (완료 셀도 같은 배경 유지)
+                          (inLoadRegion || isComplete) &&
                             !wasteful &&
-                            "bg-blue-200/70",
-                          // 완료 셀
+                            "bg-blue-200/50",
+                          // 완료 셀: 같은 배경 + emerald 테두리만 강조
                           isComplete &&
                             !wasteful &&
-                            "border-2 border-emerald-500 bg-emerald-50",
+                            "border-2 border-emerald-500",
                           // 낭비/이동 가이드 셀
                           wasteful && "border-2 border-amber-400 bg-amber-50"
                         )}
@@ -449,9 +448,9 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                             </div>
                           ))}
                         </div>
-                        {/* 완료 표시 (낭비 아닌 경우만) */}
+                        {/* 완료 표시 (낭비 아닌 경우만) — 진한 emerald 배지 */}
                         {isComplete && !wasteful && (
-                          <div className="absolute bottom-0 right-0.5 text-[9px] font-bold text-emerald-700 leading-none">
+                          <div className="absolute top-0 right-0 text-[10px] font-extrabold text-white bg-emerald-600 px-1.5 py-0.5 rounded-bl shadow-sm leading-none">
                             ✓ 완료
                           </div>
                         )}
@@ -496,12 +495,13 @@ export function DragPlanView({ result, lineWorkers }: Props) {
           솔로(1명·60%)
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-blue-200/70 border border-slate-300 inline-block" />
+          <span className="w-3 h-3 rounded bg-blue-200/50 border border-slate-300 inline-block" />
           부하 영역 (작업 필요 시간)
         </span>
         <span className="inline-flex items-center gap-1">
-          <span className="w-3 h-3 rounded bg-emerald-50 border-2 border-emerald-500 inline-block" />
-          완료 ✓
+          <span className="text-[9px] font-extrabold text-white bg-emerald-600 px-1 py-px rounded">
+            ✓ 완료
+          </span>
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="w-3 h-3 rounded bg-amber-50 border-2 border-amber-400 inline-block" />
