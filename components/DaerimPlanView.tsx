@@ -154,7 +154,14 @@ export function DaerimPlanView() {
           />
         </>
       ) : (
-        <DragPlanView result={rReal} lineWorkers={lineWorkers} />
+        <>
+          {/* 재배치 개선 효과 */}
+          <ImprovementSummary rBasic={rBasic} rReal={rReal} />
+          {/* 재배치 결과 지표 (6개) */}
+          <RealMetricsPanel result={rReal} title="재배치 결과 지표" />
+          {/* 수동 배치 그리드 */}
+          <DragPlanView result={rReal} lineWorkers={lineWorkers} />
+        </>
       )}
     </div>
   );

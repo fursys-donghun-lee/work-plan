@@ -16,11 +16,12 @@ interface Props {
 // 11 시간 슬롯 (work-time 0..10)
 const HOUR_COUNT = MAX_WORKTIME; // 11
 
-// 1명 60% 효율, 2명 100%, 0명 0
-function ratePerHour(headcount: number): number {
+// 1명 60% 효율, 2명 100%, 0명 0 — 자동라인은 1명도 100% (페널티 없음)
+function ratePerHour(headcount: number, autoManaged = false): number {
   if (headcount <= 0) return 0;
+  if (autoManaged) return headcount;
   if (headcount === 1) return 0.6;
-  return 2; // ≥2 (max 2 in practice)
+  return 2;
 }
 
 // 수동 배치 (드래그앤드롭) — 라인별 시간 슬롯에 작업자 직접 배치
@@ -70,22 +71,32 @@ export function DragPlanView({ result, lineWorkers }: Props) {
     return m;
   }, [result.timelines]);
 
-  // 라인별 누적 처리 부하 + 완료 시각 계산
+  // 라인 메타 (urgent, autoManaged) — tracking 보다 먼저 정의해야 함
+  const lineMetaEarly = useMemo(() => {
+    const m: Record<string, { urgent: boolean; autoManaged: boolean }> = {};
+    for (const t of result.timelines) {
+      m[t.name] = { urgent: t.urgent, autoManaged: t.autoManaged };
+    }
+    return m;
+  }, [result.timelines]);
+
+  // 라인별 누적 처리 부하 + 완료 시각 계산 (자동라인은 페널티 없음)
   const tracking = useMemo(() => {
     type LineTrack = {
-      byHour: number[]; // 누적 처리 부하 (각 시각 종료 후)
-      completionHour: number | null; // 완료된 시각 (없으면 null)
-      total: number; // 최종 누적
+      byHour: number[];
+      completionHour: number | null;
+      total: number;
     };
     const out: Record<string, LineTrack> = {};
     for (const line of lineNames) {
       const load = loadByLine[line] ?? 0;
+      const isAuto = lineMetaEarly[line]?.autoManaged ?? false;
       let cum = 0;
       let completion: number | null = null;
       const byHour: number[] = [];
       for (let h = 0; h < HOUR_COUNT; h++) {
         const cnt = (cellWorkers[line]?.[h] ?? []).length;
-        cum += ratePerHour(cnt);
+        cum += ratePerHour(cnt, isAuto);
         byHour[h] = cum;
         if (completion === null && load > 0.01 && cum >= load - 0.01) {
           completion = h;
@@ -94,7 +105,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
       out[line] = { byHour, completionHour: completion, total: cum };
     }
     return out;
-  }, [cellWorkers, lineNames, loadByLine]);
+  }, [cellWorkers, lineNames, loadByLine, lineMetaEarly]);
 
   // 라인별 부하 영역 — 첫 작업자 배치 시점부터 2명 짝 기준 필요한 셀 수
   // (인원이 10:30부터 이동되면 10:30부터 배경 시작)
@@ -134,14 +145,8 @@ export function DragPlanView({ result, lineWorkers }: Props) {
     return m;
   }, [cellWorkers, lineNames]);
 
-  // 라인 메타 조회용 (urgent, autoManaged)
-  const lineMeta = useMemo(() => {
-    const m: Record<string, { urgent: boolean; autoManaged: boolean }> = {};
-    for (const t of result.timelines) {
-      m[t.name] = { urgent: t.urgent, autoManaged: t.autoManaged };
-    }
-    return m;
-  }, [result.timelines]);
+  // 라인 메타 조회용 (lineMetaEarly 위에서 정의됨, 별칭만)
+  const lineMeta = lineMetaEarly;
 
 
   // 시각 atHour 에서 추천 도착 라인 — 재배치 알고리즘과 동일 우선순위:
@@ -344,7 +349,8 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                   : done >= load - 0.01
                     ? `완료 (여유 ${(done - load).toFixed(1)})`
                     : `이월 ${(load - done).toFixed(1)}인시`;
-              const needsMoreWorkers = load > 0.01 && done < load - 0.01;
+              const needsMoreWorkers =
+                !isAuto && load > 0.01 && done < load - 0.01;
               return (
                 <tr key={line}>
                   <th className="sticky left-0 bg-white border-b border-slate-100 pl-2 pr-1 py-1 text-left font-medium text-slate-700">
