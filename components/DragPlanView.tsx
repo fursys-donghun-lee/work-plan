@@ -420,7 +420,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
                 라인
               </th>
               <th className="border-b border-slate-200 px-0 py-1 text-center font-semibold text-slate-600 w-[5rem]">
-                배정 상태
+                인원 상태
               </th>
               <th className="border-b border-slate-200 px-1 py-1 text-center font-semibold text-slate-600 w-[4rem]">
                 처리/부하
@@ -473,8 +473,49 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
                   : done >= load - 0.01
                     ? `완료 (여유 ${(done - load).toFixed(1)})`
                     : `이월 ${(load - done).toFixed(1)}인시`;
-              const needsMoreWorkers =
-                !isAuto && load > 0.01 && done < load - 0.01;
+              // 부하 영역 내 최대 hc (이미 2명 짝 차있는지 판단용)
+              let maxHcInLoad = 0;
+              for (let h = 0; h < HOUR_COUNT; h++) {
+                maxHcInLoad = Math.max(
+                  maxHcInLoad,
+                  (cellWorkers[line]?.[h] ?? []).length
+                );
+              }
+              type StatusBadge = {
+                text: string;
+                tone: "rose" | "amber" | "slate";
+                title: string;
+              };
+              let statusBadge: StatusBadge | null = null;
+              if (!isAuto) {
+                if (load > 0.01 && done < load - 0.01) {
+                  if (maxHcInLoad >= 2) {
+                    statusBadge = {
+                      text: "임시셀구성필요",
+                      tone: "amber",
+                      title: `부하 ${load.toFixed(1)}인시 중 ${done.toFixed(1)}인시 처리 — 이미 2명 짝 — 잔여 ${(load - done).toFixed(1)}인시는 임시셀 필요`,
+                    };
+                  } else {
+                    statusBadge = {
+                      text: "인원배정필요",
+                      tone: "rose",
+                      title: `부하 ${load.toFixed(1)}인시 중 ${done.toFixed(1)}인시 처리 — 추가 ${(load - done).toFixed(1)}인시 필요`,
+                    };
+                  }
+                } else if (
+                  maxHcInLoad > 0 &&
+                  (load <= 0.01 || done >= load + 1)
+                ) {
+                  statusBadge = {
+                    text: "인원여유",
+                    tone: "slate",
+                    title:
+                      load <= 0.01
+                        ? `이 라인에 부하 없음 (${maxHcInLoad}명 배치됨)`
+                        : `부하 ${load.toFixed(1)}인시 대비 ${done.toFixed(1)}인시 처리 — ${(done - load).toFixed(1)}인시 여유`,
+                  };
+                }
+              }
               return (
                 <tr key={line}>
                   <th className="sticky left-0 bg-white border-b border-slate-100 pl-2 pr-1 py-1 text-left font-medium text-slate-700">
@@ -485,12 +526,19 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
                     </div>
                   </th>
                   <td className="border-b border-slate-100 pl-0 pr-1 py-1 text-center align-middle">
-                    {needsMoreWorkers ? (
+                    {statusBadge ? (
                       <span
-                        className="inline-block text-[10px] font-bold text-rose-700 bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded whitespace-nowrap"
-                        title={`부하 ${load.toFixed(1)}인시 중 ${done.toFixed(1)}인시 처리 — 추가 ${(load - done).toFixed(1)}인시 필요`}
+                        className={cn(
+                          "inline-block text-[10px] font-bold border px-1.5 py-0.5 rounded whitespace-nowrap",
+                          statusBadge.tone === "rose"
+                            ? "text-rose-700 bg-rose-100 border-rose-300"
+                            : statusBadge.tone === "amber"
+                              ? "text-amber-800 bg-amber-100 border-amber-400"
+                              : "text-slate-600 bg-slate-100 border-slate-300"
+                        )}
+                        title={statusBadge.title}
                       >
-                        인원배정필요
+                        {statusBadge.text}
                       </span>
                     ) : (
                       <span className="text-slate-300 text-[10px]">—</span>
