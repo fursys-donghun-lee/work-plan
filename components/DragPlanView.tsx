@@ -106,18 +106,63 @@ export function DragPlanView({ result, lineWorkers }: Props) {
     return m;
   }, [loadByLine, lineNames]);
 
-  // 시각 h 에서 추천 도착 라인 (가장 잔여 부하 큰 라인)
+  // 라인 메타 조회용 (urgent, autoManaged)
+  const lineMeta = useMemo(() => {
+    const m: Record<string, { urgent: boolean; autoManaged: boolean }> = {};
+    for (const t of result.timelines) {
+      m[t.name] = { urgent: t.urgent, autoManaged: t.autoManaged };
+    }
+    return m;
+  }, [result.timelines]);
+
+  // 시각 atHour 에서 추천 도착 라인 — 재배치 알고리즘과 동일 우선순위:
+  //  1) 긴급(D-1/D-2) 라인 중 2명 미만 (짝 완성 필요)
+  //  2) 솔로(1명) 라인 짝 완성
+  //  3) 0명 라인 가동 시작
+  //  4) 그 외 잔여 부하 큰 라인 (병목)
+  // 제외: 자동포장라인 / 완료 라인 / 이미 짝(2명) 라인
   const suggestionAt = (atHour: number): string | null => {
-    const candidates = lineNames
-      .filter((l) => (loadByLine[l] ?? 0) > 0.01)
-      .map((l) => {
-        const cum = tracking[l]?.byHour[atHour] ?? 0;
-        const load = loadByLine[l] ?? 0;
-        return { line: l, remaining: load - cum };
-      })
-      .filter((c) => c.remaining > 0.01)
+    type Cand = {
+      line: string;
+      hc: number;
+      urgent: boolean;
+      remaining: number;
+    };
+    const cands: Cand[] = [];
+    for (const l of lineNames) {
+      const meta = lineMeta[l];
+      if (!meta || meta.autoManaged) continue; // 자동라인 제외
+      const load = loadByLine[l] ?? 0;
+      if (load <= 0.01) continue;
+      const cum = tracking[l]?.byHour[atHour] ?? 0;
+      if (cum >= load - 0.01) continue; // 완료 라인 제외
+      const hc = (cellWorkers[l]?.[atHour] ?? []).length;
+      if (hc >= 2) continue; // 이미 짝(2명) 채워진 라인 제외
+      cands.push({
+        line: l,
+        hc,
+        urgent: meta.urgent,
+        remaining: load - cum,
+      });
+    }
+    // 1) 긴급 우선
+    const urgentNeed = cands
+      .filter((c) => c.urgent)
+      .sort((a, b) => a.hc - b.hc || b.remaining - a.remaining);
+    if (urgentNeed.length > 0) return urgentNeed[0].line;
+    // 2) 솔로 짝 완성
+    const solos = cands
+      .filter((c) => c.hc === 1)
       .sort((a, b) => b.remaining - a.remaining);
-    return candidates[0]?.line ?? null;
+    if (solos.length > 0) return solos[0].line;
+    // 3) 0명 라인 가동 시작
+    const zeros = cands
+      .filter((c) => c.hc === 0)
+      .sort((a, b) => b.remaining - a.remaining);
+    if (zeros.length > 0) return zeros[0].line;
+    // 4) 그 외 잔여 부하 큰 라인
+    const rest = cands.sort((a, b) => b.remaining - a.remaining);
+    return rest[0]?.line ?? null;
   };
 
   // 호환: 기존 consumed 사용처를 위해 별칭
