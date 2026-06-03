@@ -241,20 +241,9 @@ export function DragPlanView({ result, lineWorkers }: Props) {
   // 초기화
   const handleReset = () => setAssignments(initialAssignments);
 
-  // 이 라인의 잔업 작업자 모두 빼기 (work-time 8~10 셀에서 해당 라인 제거)
-  const skipOTForLine = (line: string) => {
-    setAssignments((prev) => {
-      const next: Record<string, string[]> = {};
-      for (const w of Object.keys(prev)) {
-        const arr = [...prev[w]];
-        for (let h = 8; h < HOUR_COUNT; h++) {
-          if (arr[h] === line) arr[h] = "";
-        }
-        next[w] = arr;
-      }
-      return next;
-    });
-  };
+  // 화면 표시용 라인 이름 (자동포장라인 → 자동포장)
+  const displayName = (line: string) =>
+    line === "자동포장라인" ? "자동포장" : line;
 
   // 시간 슬롯 — 근무 셀과 휴게(점심·저녁) 셀이 섞여 있는 시간축
   type Slot =
@@ -294,17 +283,17 @@ export function DragPlanView({ result, lineWorkers }: Props) {
         </button>
       </div>
 
-      <div className="overflow-x-auto">
-        <table className="text-xs border-collapse w-full">
+      <div>
+        <table className="text-xs border-collapse w-full table-fixed">
           <thead>
             <tr>
-              <th className="sticky left-0 bg-white border-b border-slate-200 pl-2 pr-1 py-1 text-left font-semibold text-slate-600 w-24 min-w-[6rem]">
+              <th className="bg-white border-b border-slate-200 pl-1 pr-0 py-1 text-left font-semibold text-slate-600 w-[4.5rem]">
                 라인
               </th>
-              <th className="border-b border-slate-200 pl-0 pr-1 py-1 text-center font-semibold text-slate-600 w-24 min-w-[6rem]">
+              <th className="border-b border-slate-200 px-0 py-1 text-center font-semibold text-slate-600 w-[5rem]">
                 배정 상태
               </th>
-              <th className="border-b border-slate-200 px-2 py-1 text-center font-semibold text-slate-600 w-24 min-w-[6rem]">
+              <th className="border-b border-slate-200 px-1 py-1 text-center font-semibold text-slate-600 w-[4rem]">
                 처리/부하
               </th>
               {slots.map((s, idx) => {
@@ -312,14 +301,10 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                   return (
                     <th
                       key={`brk-${idx}`}
-                      className="border-b border-slate-300 px-1 py-1 text-center w-10 min-w-[2.5rem] bg-slate-200/60"
+                      className="border-b border-slate-300 px-0 py-1 text-center w-[1.6rem] bg-slate-200/60"
                     >
-                      <div className="text-[10px] font-semibold text-slate-600">
+                      <div className="text-[9px] font-semibold text-slate-600">
                         {s.label}
-                      </div>
-                      <div className="text-[8px] text-slate-500">
-                        {formatHM(s.wallStart)}
-                        <br />~{formatHM(s.wallEnd)}
                       </div>
                     </th>
                   );
@@ -328,7 +313,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                   <th
                     key={`w-${s.wt}`}
                     className={cn(
-                      "border-b border-slate-200 px-1 py-1 text-center w-24 min-w-[6rem]",
+                      "border-b border-slate-200 px-0 py-1 text-center w-[4rem]",
                       s.isOT && "bg-rose-50/40",
                       s.isFirstOT && "border-l-4 border-l-rose-500"
                     )}
@@ -363,27 +348,11 @@ export function DragPlanView({ result, lineWorkers }: Props) {
               return (
                 <tr key={line}>
                   <th className="sticky left-0 bg-white border-b border-slate-100 pl-2 pr-1 py-1 text-left font-medium text-slate-700">
-                    <div className="truncate">
+                    <div className="truncate text-xs">
                       {result.timelines.find((t) => t.name === line)?.urgent &&
                         "● "}
-                      {line}
+                      {displayName(line)}
                     </div>
-                    {isAuto && (
-                      <div className="text-[10px] text-emerald-600 font-normal">
-                        자동라인
-                      </div>
-                    )}
-                    {/* 잔업 안하기 버튼 — 이 라인에 잔업 셀 작업자가 있을 때만 */}
-                    {!isAuto && (lineOTCellsUsed[line] ?? 0) > 0 && (
-                      <button
-                        type="button"
-                        onClick={() => skipOTForLine(line)}
-                        className="mt-1 text-[9px] font-medium text-rose-700 bg-rose-50 hover:bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded whitespace-nowrap"
-                        title="이 라인의 잔업(18:00~21:00) 시간대에 배치된 모든 작업자를 빼기"
-                      >
-                        ✕ 잔업 안하기
-                      </button>
-                    )}
                   </th>
                   <td className="border-b border-slate-100 pl-0 pr-1 py-1 text-center align-middle">
                     {needsMoreWorkers ? (
@@ -422,7 +391,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                       return (
                         <td
                           key={`brk-${idx}`}
-                          className="border border-slate-300 bg-slate-200/40 w-10 min-w-[2.5rem]"
+                          className="border border-slate-300 bg-slate-200/40 w-[1.6rem]"
                           title={`${s.label} 휴게 ${formatHM(s.wallStart)}~${formatHM(s.wallEnd)}`}
                         />
                       );
