@@ -283,10 +283,10 @@ export function DragPlanView({ result, lineWorkers }: Props) {
         <table className="text-xs border-collapse w-full">
           <thead>
             <tr>
-              <th className="sticky left-0 bg-white border-b border-slate-200 px-2 py-1 text-left font-semibold text-slate-600 w-32 min-w-[8rem]">
+              <th className="sticky left-0 bg-white border-b border-slate-200 pl-2 pr-1 py-1 text-left font-semibold text-slate-600 w-24 min-w-[6rem]">
                 라인
               </th>
-              <th className="border-b border-slate-200 px-2 py-1 text-center font-semibold text-slate-600 w-28 min-w-[7rem]">
+              <th className="border-b border-slate-200 pl-0 pr-1 py-1 text-center font-semibold text-slate-600 w-24 min-w-[6rem]">
                 배정 상태
               </th>
               <th className="border-b border-slate-200 px-2 py-1 text-center font-semibold text-slate-600 w-24 min-w-[6rem]">
@@ -313,7 +313,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                   <th
                     key={`w-${s.wt}`}
                     className={cn(
-                      "border-b border-slate-200 px-1 py-1 text-center w-20 min-w-[5rem]",
+                      "border-b border-slate-200 px-1 py-1 text-center w-24 min-w-[6rem]",
                       s.isOT && "bg-rose-50/40",
                       s.isFirstOT && "border-l-4 border-l-rose-500"
                     )}
@@ -347,7 +347,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
               const needsMoreWorkers = load > 0.01 && done < load - 0.01;
               return (
                 <tr key={line}>
-                  <th className="sticky left-0 bg-white border-b border-slate-100 px-2 py-1 text-left font-medium text-slate-700">
+                  <th className="sticky left-0 bg-white border-b border-slate-100 pl-2 pr-1 py-1 text-left font-medium text-slate-700">
                     <div className="truncate">
                       {result.timelines.find((t) => t.name === line)?.urgent &&
                         "● "}
@@ -359,7 +359,7 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                       </div>
                     )}
                   </th>
-                  <td className="border-b border-slate-100 px-1 py-1 text-center align-middle">
+                  <td className="border-b border-slate-100 pl-0 pr-1 py-1 text-center align-middle">
                     {needsMoreWorkers ? (
                       <span
                         className="inline-block text-[10px] font-bold text-rose-700 bg-rose-100 border border-rose-300 px-1.5 py-0.5 rounded whitespace-nowrap"
@@ -491,8 +491,8 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                         )}
                         {/* 이동 가이드 */}
                         {wasteful && (
-                          <div className="absolute bottom-0 left-0.5 right-0.5 text-[9px] leading-tight">
-                            <div className="text-amber-700 font-bold">
+                          <div className="absolute bottom-0 left-0 right-0 text-[9px] leading-tight px-0.5">
+                            <div className="text-amber-700 font-bold whitespace-nowrap">
                               {wasteReason === "noload"
                                 ? `부하 없음 (${workers.length}명)`
                                 : wasteReason === "wasteOT"
@@ -500,11 +500,11 @@ export function DragPlanView({ result, lineWorkers }: Props) {
                                   : `여유 ${workers.length}명`}
                             </div>
                             {suggested ? (
-                              <div className="text-blue-700 truncate">
+                              <div className="text-blue-700 whitespace-nowrap">
                                 → {suggested}
                               </div>
                             ) : (
-                              <div className="text-slate-500 truncate">
+                              <div className="text-slate-500 whitespace-nowrap">
                                 → 빠지기
                               </div>
                             )}
