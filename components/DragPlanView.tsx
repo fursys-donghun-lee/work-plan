@@ -45,22 +45,76 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     useState<Record<string, string[]>>(initialAssignments);
 
   // 확정/잠금 상태 — 확정 시 현재 assignments 를 스냅샷, 다시 누르면 해제
+  // 확정된 계획은 localStorage 에 저장되어 새로고침/탭전환 후에도 유지
+  // (그날 24:00 전까지 또는 확정해제 후 수정시까지)
+  const STORAGE_KEY = "drag-plan-confirmed-v1";
   const [confirmed, setConfirmed] = useState<Record<string, string[]> | null>(
     null
   );
   const [locked, setLocked] = useState(false);
-  const [viewingConfirmed, setViewingConfirmed] = useState(false);
   const [viewingBasic, setViewingBasic] = useState(false);
 
-  // 화면에 표시할 데이터 source — 확정/기본 보기 중이면 그 스냅샷
-  const displayAssignments =
-    viewingConfirmed && confirmed
-      ? confirmed
-      : viewingBasic
-        ? initialAssignments
-        : assignments;
+  // 화면에 표시할 데이터 source — 기본 보기 중이면 출근 위치 그대로
+  const displayAssignments = viewingBasic ? initialAssignments : assignments;
 
-  const readOnly = locked || viewingConfirmed || viewingBasic;
+  const readOnly = locked || viewingBasic;
+
+  // mount 시 localStorage 에서 확정계획 복원 (만료 안 됐으면)
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (!stored) return;
+    try {
+      const parsed = JSON.parse(stored) as {
+        assignments: Record<string, string[]>;
+        expiresAt: number;
+      };
+      if (Date.now() >= parsed.expiresAt) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+      setConfirmed(parsed.assignments);
+      setAssignments(parsed.assignments);
+      setLocked(true);
+    } catch {
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 자정에 자동 만료 (페이지 켜둔 채 24:00 넘어가면)
+  useEffect(() => {
+    if (!confirmed || typeof window === "undefined") return;
+    const stored = window.localStorage.getItem(STORAGE_KEY);
+    if (!stored) return;
+    try {
+      const { expiresAt } = JSON.parse(stored) as { expiresAt: number };
+      const ms = expiresAt - Date.now();
+      if (ms <= 0) {
+        setConfirmed(null);
+        setLocked(false);
+        window.localStorage.removeItem(STORAGE_KEY);
+        return;
+      }
+      const handle = window.setTimeout(() => {
+        setConfirmed(null);
+        setLocked(false);
+        window.localStorage.removeItem(STORAGE_KEY);
+      }, ms);
+      return () => window.clearTimeout(handle);
+    } catch {
+      // ignore
+    }
+  }, [confirmed]);
+
+  // 확정해제 + 수정시 localStorage 정리 (잠금 풀린 상태에서 assignments 가 confirmed 와 달라지면)
+  useEffect(() => {
+    if (locked || !confirmed || typeof window === "undefined") return;
+    if (JSON.stringify(assignments) !== JSON.stringify(confirmed)) {
+      setConfirmed(null);
+      window.localStorage.removeItem(STORAGE_KEY);
+    }
+  }, [assignments, confirmed, locked]);
 
   // 입력 순서의 라인 이름 (계산용 — sort 전 단계)
   const lineNames = useMemo(
@@ -465,25 +519,30 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   };
 
   // 확정 토글 — 잠금이 풀려있으면 현재 assignments 를 스냅샷+잠금, 잠금이면 해제
+  // 확정시 localStorage 에 저장 (그날 24:00 만료)
   const handleConfirmToggle = () => {
     if (locked) {
       setLocked(false);
-    } else {
-      setConfirmed(JSON.parse(JSON.stringify(assignments)));
-      setLocked(true);
+      return;
+    }
+    const snap = JSON.parse(JSON.stringify(assignments)) as Record<
+      string,
+      string[]
+    >;
+    setConfirmed(snap);
+    setLocked(true);
+    if (typeof window !== "undefined") {
+      const end = new Date();
+      end.setHours(23, 59, 59, 999);
+      window.localStorage.setItem(
+        STORAGE_KEY,
+        JSON.stringify({ assignments: snap, expiresAt: end.getTime() })
+      );
     }
   };
 
-  // 확정 계획 보기 토글 (기본 배치 보기는 자동 해제)
-  const handleViewConfirmedToggle = () => {
-    if (!confirmed) return;
-    setViewingBasic(false);
-    setViewingConfirmed((v) => !v);
-  };
-
-  // 기본 배치 보기 토글 (확정 계획 보기는 자동 해제)
+  // 기본 배치 보기 토글
   const handleViewBasicToggle = () => {
-    setViewingConfirmed(false);
     setViewingBasic((v) => !v);
   };
 
@@ -524,13 +583,11 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
         <h2 className="font-semibold text-slate-900">
           수동 배치 (드래그앤드롭)
           <span className="ml-2 text-xs font-normal text-slate-500">
-            {viewingConfirmed
-              ? "확정 계획 보는 중 (읽기 전용)"
-              : viewingBasic
-                ? "기본 배치 보는 중 (이동 없음, 읽기 전용)"
-                : locked
-                  ? "확정 — 잠금 상태 (편집 불가)"
-                  : "작업자 칩을 다른 라인·시간으로 드래그해서 직접 배치"}
+            {viewingBasic
+              ? "기본 배치 보는 중 (이동 없음, 읽기 전용)"
+              : locked
+                ? "확정 — 잠금 상태 (편집 불가, 새로고침해도 24:00까지 유지)"
+                : "작업자 칩을 다른 라인·시간으로 드래그해서 직접 배치"}
           </span>
         </h2>
         <div className="flex items-center gap-2">
@@ -545,7 +602,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
           <button
             type="button"
             onClick={handleConfirmToggle}
-            disabled={viewingConfirmed || viewingBasic}
+            disabled={viewingBasic}
             className={cn(
               "text-xs px-3 py-1.5 font-semibold rounded disabled:opacity-40 disabled:cursor-not-allowed",
               locked
@@ -553,37 +610,18 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
                 : "bg-blue-600 hover:bg-blue-700 text-white border border-blue-600"
             )}
             title={
-              locked ? "다시 누르면 잠금 해제" : "현재 배치를 확정 (잠금)"
+              locked
+                ? "다시 누르면 잠금 해제 (수정 시까지 24:00까지 유지)"
+                : "현재 배치를 확정 (잠금, 새로고침 후에도 유지)"
             }
           >
             {locked ? "확정 해제" : "확정"}
           </button>
           <button
             type="button"
-            onClick={handleViewConfirmedToggle}
-            disabled={!confirmed || viewingBasic}
-            className={cn(
-              "text-xs px-3 py-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed",
-              viewingConfirmed
-                ? "bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200"
-                : "border-slate-300 hover:bg-slate-50"
-            )}
-            title={
-              !confirmed
-                ? "확정된 계획이 없습니다 — 먼저 '확정' 을 누르세요"
-                : viewingConfirmed
-                  ? "현재 작업 계획으로 돌아가기"
-                  : "확정한 계획 보기"
-            }
-          >
-            {viewingConfirmed ? "현재 계획 보기" : "확정 계획 보기"}
-          </button>
-          <button
-            type="button"
             onClick={handleViewBasicToggle}
-            disabled={viewingConfirmed}
             className={cn(
-              "text-xs px-3 py-1.5 rounded border disabled:opacity-40 disabled:cursor-not-allowed",
+              "text-xs px-3 py-1.5 rounded border",
               viewingBasic
                 ? "bg-sky-100 border-sky-300 text-sky-800 hover:bg-sky-200"
                 : "border-slate-300 hover:bg-slate-50"
