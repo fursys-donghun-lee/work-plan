@@ -346,13 +346,31 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     });
   }, [lineNames, loadByLine, consumed, cellWorkers, lineMeta]);
 
-  // 잔업 ≤ 2h 인 라인은 인원 자동 빠짐 (잔업 셀에서 작업자 제거)
-  // 규칙: 라인의 OT 셀 사용 시간이 1~2h 이면 그 라인 OT 셀의 모든 작업자를 비움
+  // 잔업 자동 빠짐 — 배치된 인원이 실제로 작업할 시간이 < 2h 이면 잔업 셀에서 제거
+  // 기준: 잔여부하(carry) / 잔업 최대 hc 의 rate = 실제 작업해야 할 wall-time
+  //   ex) carry 3인시 + 2명 (rate 2) → 1.5h < 2h → 빠짐
+  //   ex) carry 5인시 + 2명 (rate 2) → 2.5h ≥ 2h → 유지
+  //   ex) carry 0인시 (정규시간에 모두 처리됨) → 무조건 빠짐
   useEffect(() => {
     const toClear: { worker: string; hours: number[] }[] = [];
     for (const line of lineNames) {
-      const otCells = lineOTCellsUsed[line] ?? 0;
-      if (otCells <= 0 || otCells > 2) continue;
+      const isAuto = lineMeta[line]?.autoManaged ?? false;
+      if (isAuto) continue;
+      let regularDone = 0;
+      for (let h = 0; h < 8; h++) {
+        const cnt = (cellWorkers[line]?.[h] ?? []).length;
+        regularDone += ratePerHour(cnt, isAuto);
+      }
+      const load = loadByLine[line] ?? 0;
+      const carry = Math.max(0, load - regularDone);
+      let otHc = 0;
+      for (let h = 8; h < HOUR_COUNT; h++) {
+        otHc = Math.max(otHc, (cellWorkers[line]?.[h] ?? []).length);
+      }
+      if (otHc === 0) continue;
+      const otRate = ratePerHour(otHc, isAuto);
+      const workTime = otRate > 0 ? carry / otRate : 0;
+      if (workTime >= 2 - 1e-6) continue;
       for (let h = 8; h < HOUR_COUNT; h++) {
         const ws = cellWorkers[line]?.[h] ?? [];
         for (const w of ws) {
@@ -375,7 +393,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       }
       return next;
     });
-  }, [cellWorkers, lineOTCellsUsed, lineNames]);
+  }, [cellWorkers, lineNames, lineMeta, loadByLine]);
 
   // 드래그 핸들러
   const [dragging, setDragging] = useState<string | null>(null);
