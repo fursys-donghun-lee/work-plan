@@ -6,10 +6,14 @@ import {
   formatHM,
   MAX_WORKTIME,
   type ReallocResult,
+  type ReallocSegment,
 } from "@/lib/calc/reallocation";
+import { RealMetricsPanel } from "@/components/RealMetricsPanel";
+import { ImprovementSummary } from "@/components/ImprovementSummary";
 
 interface Props {
-  result: ReallocResult; // 라인 부하 정보용
+  result: ReallocResult; // 라인 부하 정보용 (재배치 시뮬 결과 — 라인/부하 메타)
+  rBasic: ReallocResult; // 기본 배치 결과 (개선 효과 비교용)
   lineWorkers: Record<string, string[]>; // 출근 시 라인별 작업자
 }
 
@@ -25,7 +29,7 @@ function ratePerHour(headcount: number, autoManaged = false): number {
 }
 
 // 수동 배치 (드래그앤드롭) — 라인별 시간 슬롯에 작업자 직접 배치
-export function DragPlanView({ result, lineWorkers }: Props) {
+export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   // assignments[workerName] = [line at hour 0, ..., hour HOUR_COUNT-1]
   const initialAssignments = useMemo(() => {
     const m: Record<string, string[]> = {};
@@ -147,6 +151,119 @@ export function DragPlanView({ result, lineWorkers }: Props) {
 
   // 라인 메타 조회용 (lineMetaEarly 위에서 정의됨, 별칭만)
   const lineMeta = lineMetaEarly;
+
+  // 수동 배치 기반 합성 ReallocResult — 상단 패널이 드래그 결과에 따라 즉시 갱신됨
+  const manualResult = useMemo<ReallocResult>(() => {
+    const STANDARD = 8;
+    const allWorkersSet = new Set<string>();
+    for (const ws of Object.values(lineWorkers)) for (const w of ws) allWorkersSet.add(w);
+    const totalPeople = allWorkersSet.size;
+
+    const timelinesOut = lineNames.map((line) => {
+      const isAuto = lineMeta[line]?.autoManaged ?? false;
+      const load = loadByLine[line] ?? 0;
+      // segments — hc 변경시점마다 분할
+      const segments: ReallocSegment[] = [];
+      let curStart = 0;
+      let curHc = (cellWorkers[line]?.[0] ?? []).length;
+      for (let h = 1; h <= HOUR_COUNT; h++) {
+        const hc = h < HOUR_COUNT ? (cellWorkers[line]?.[h] ?? []).length : -1;
+        if (h === HOUR_COUNT || hc !== curHc) {
+          if (curHc > 0) {
+            segments.push({ start: curStart, end: h, base: curHc, added: 0 });
+          }
+          if (h < HOUR_COUNT) {
+            curStart = h;
+            curHc = hc;
+          }
+        }
+      }
+      // 누적 처리 계산 → 완료시각, 이월
+      let cum = 0;
+      let finish: number | null = null;
+      for (const seg of segments) {
+        const segHours = seg.end - seg.start;
+        const r = ratePerHour(seg.base + seg.added, isAuto);
+        const need = load - cum;
+        if (finish === null && load > 0.01 && r > 0 && need > 0 && need <= r * segHours + 1e-6) {
+          finish = seg.start + need / r;
+        }
+        cum += r * segHours;
+      }
+      const carry = Math.max(0, load - cum);
+      return {
+        name: line,
+        loadHours: load,
+        initialHeadcount: (cellWorkers[line]?.[0] ?? []).length,
+        segments,
+        finishTime: finish,
+        carryHours: carry,
+        urgent: lineMeta[line]?.urgent ?? false,
+        autoManaged: isAuto,
+      };
+    });
+
+    // 집계: 정규/잔업 작업시간, 잔업인원, 잔업 종료시각
+    let regularWork = 0;
+    let otWork = 0;
+    let overtimePeople = 0;
+    let otOperationEnd = STANDARD;
+    let totalCarry = 0;
+    let totalLoad = 0;
+    for (const t of timelinesOut) {
+      totalCarry += t.carryHours;
+      totalLoad += t.loadHours;
+    }
+    for (const line of lineNames) {
+      const isAuto = lineMeta[line]?.autoManaged ?? false;
+      let otCells = 0;
+      let maxOtHc = 0;
+      let lineOtWork = 0;
+      for (let h = 0; h < HOUR_COUNT; h++) {
+        const cnt = (cellWorkers[line]?.[h] ?? []).length;
+        const r = ratePerHour(cnt, isAuto);
+        if (h < STANDARD) {
+          regularWork += r;
+        } else {
+          otWork += r;
+          if (cnt > 0) {
+            otCells++;
+            maxOtHc = Math.max(maxOtHc, cnt);
+            otOperationEnd = Math.max(otOperationEnd, h + 1);
+            lineOtWork += r;
+          }
+        }
+      }
+      // 잔업 2h 이상 라인만 잔업인원으로 카운트 (≥2 셀)
+      if (otCells >= 2) overtimePeople += maxOtHc;
+    }
+
+    const availableLoad = totalPeople * STANDARD;
+    const regularIdle = Math.max(0, availableLoad - regularWork);
+    const otDuration = Math.max(0, otOperationEnd - STANDARD);
+    const otIdle = Math.max(0, overtimePeople * otDuration - otWork);
+    const idle = regularIdle + otIdle;
+
+    return {
+      startTime: 0,
+      standardEnd: STANDARD,
+      actualEnd: otOperationEnd,
+      hasOvertime: otOperationEnd > STANDARD,
+      overtimeHours: otDuration,
+      moves: [],
+      timelines: timelinesOut,
+      totalLoad,
+      totalPeople,
+      totalCarry,
+      availableLoad,
+      workHours: regularWork,
+      idleHours: idle,
+      regularIdleHours: regularIdle,
+      overtimeIdleHours: otIdle,
+      overtimePeople,
+      overtimePersonHours: otWork,
+    };
+  }, [cellWorkers, lineNames, lineMeta, loadByLine, lineWorkers]);
 
 
   // 시각 atHour 에서 추천 도착 라인 — 재배치 알고리즘과 동일 우선순위:
@@ -271,6 +388,13 @@ export function DragPlanView({ result, lineWorkers }: Props) {
   ];
 
   return (
+    <>
+      {/* 수동 배치 결과에 따라 실시간 갱신되는 패널 */}
+      <ImprovementSummary rBasic={rBasic} rReal={manualResult} />
+      <RealMetricsPanel
+        result={manualResult}
+        title="수동 배치 결과 지표"
+      />
     <div className="card">
       <div className="flex items-center justify-between mb-3">
         <h2 className="font-semibold text-slate-900">
@@ -547,5 +671,6 @@ export function DragPlanView({ result, lineWorkers }: Props) {
         <span>· 드래그로 작업자 이동 · 드롭 시 그 시각부터 같은 라인이 이어지는 한 자동 전파</span>
       </div>
     </div>
+    </>
   );
 }
