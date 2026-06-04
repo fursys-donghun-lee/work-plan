@@ -396,6 +396,9 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   }, [tracking, lineNames]);
 
   // 행 정렬: 인원배정필요(0) → 인원여유(1) → 기타(2), 각 그룹 내 이름 오름차순
+  // 편집 중에는 정렬이 안 바뀌도록 sortVersion 트리거에만 재계산.
+  // (예: 여유 2명 라인에서 1명 이동 후 남은 1명 이동할 때 라인이 자리 안 옮기게)
+  const [sortVersion, setSortVersion] = useState(0);
   const displayLines = useMemo(() => {
     const priority = (line: string): number => {
       const load = loadByLine[line] ?? 0;
@@ -416,7 +419,13 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       if (pa !== pb) return pa - pb;
       return a.localeCompare(b);
     });
-  }, [lineNames, loadByLine, consumed, cellWorkers, lineMeta]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sortVersion, lineNames]);
+
+  // 모드 전환 / 데이터 변경 시 정렬 새로고침
+  useEffect(() => {
+    setSortVersion((v) => v + 1);
+  }, [viewingBasic, lineNames]);
 
   // 잔업 자동 빠짐 — 확정/보기 중에는 실행하지 않음
   // (readOnly 라도 effect 는 등록, 내부에서 가드)
@@ -516,6 +525,12 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   const handleReset = () => {
     if (readOnly) return;
     setAssignments(initialAssignments);
+    setSortVersion((v) => v + 1);
+  };
+
+  // 정렬 새로고침 — 현재 상태 기준으로 다시 정렬
+  const handleResort = () => {
+    setSortVersion((v) => v + 1);
   };
 
   // 확정 토글 — 잠금이 풀려있으면 현재 assignments 를 스냅샷+잠금, 잠금이면 해제
@@ -591,6 +606,15 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
           </span>
         </h2>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleResort}
+            disabled={viewingBasic}
+            className="text-xs px-3 py-1.5 border border-slate-300 hover:bg-slate-50 rounded disabled:opacity-40 disabled:cursor-not-allowed"
+            title="현재 상태 기준으로 라인 순서 다시 정렬"
+          >
+            정렬 새로고침
+          </button>
           <button
             type="button"
             onClick={handleReset}
