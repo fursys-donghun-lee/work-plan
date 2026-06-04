@@ -396,11 +396,16 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   }, [tracking, lineNames]);
 
   // 행 정렬: 인원배정필요(0) → 인원여유(1) → 기타(2), 각 그룹 내 이름 오름차순
-  // 편집 중에는 정렬이 안 바뀌도록 sortVersion 트리거에만 재계산.
-  // (예: 여유 2명 라인에서 1명 이동 후 남은 1명 이동할 때 라인이 자리 안 옮기게)
-  const [sortVersion, setSortVersion] = useState(0);
-  const displayLines = useMemo(() => {
-    const priority = (line: string): number => {
+  // Sticky 정책: 한 번 '인원여유(1)' 로 들어간 라인은 그 라인의 작업자가 모두
+  // 빠질 때까지(maxHc=0) 인원여유 그룹에 그대로 머묾.
+  //   예: 여유 2명 라인에서 1명 이동 → 남은 1명 있으니 자리 유지
+  //       2명 모두 이동 → maxHc=0 → 그제서야 기타 그룹으로 내려감
+  const [stickyPriorities, setStickyPriorities] = useState<
+    Record<string, number>
+  >({});
+
+  useEffect(() => {
+    const computeIdeal = (line: string): number => {
       const load = loadByLine[line] ?? 0;
       const done = consumed[line] ?? 0;
       const isAuto = lineMeta[line]?.autoManaged ?? false;
@@ -409,23 +414,42 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       for (let h = 0; h < HOUR_COUNT; h++) {
         maxHc = Math.max(maxHc, (cellWorkers[line]?.[h] ?? []).length);
       }
-      if (load > 0.01 && done < load - 0.01 && maxHc < 2) return 0; // 인원배정필요
-      if (maxHc > 0 && (load <= 0.01 || done >= load + 1)) return 1; // 인원여유
+      if (load > 0.01 && done < load - 0.01 && maxHc < 2) return 0;
+      if (maxHc > 0 && (load <= 0.01 || done >= load + 1)) return 1;
       return 2;
     };
+    setStickyPriorities((prev) => {
+      const next: Record<string, number> = {};
+      let changed = false;
+      for (const line of lineNames) {
+        const ideal = computeIdeal(line);
+        const prevVal = prev[line];
+        let resolved = ideal;
+        // 이전이 인원여유(1) 였다면 작업자가 남아있는 한 1 유지
+        if (prevVal === 1) {
+          let maxHc = 0;
+          for (let h = 0; h < HOUR_COUNT; h++) {
+            maxHc = Math.max(maxHc, (cellWorkers[line]?.[h] ?? []).length);
+          }
+          if (maxHc > 0) resolved = 1;
+        }
+        next[line] = resolved;
+        if (resolved !== prevVal) changed = true;
+      }
+      const prevKeys = Object.keys(prev);
+      if (!changed && prevKeys.length === lineNames.length) return prev;
+      return next;
+    });
+  }, [cellWorkers, lineNames, loadByLine, consumed, lineMeta]);
+
+  const displayLines = useMemo(() => {
     return [...lineNames].sort((a, b) => {
-      const pa = priority(a);
-      const pb = priority(b);
+      const pa = stickyPriorities[a] ?? 2;
+      const pb = stickyPriorities[b] ?? 2;
       if (pa !== pb) return pa - pb;
       return a.localeCompare(b);
     });
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [sortVersion, lineNames]);
-
-  // 모드 전환 / 데이터 변경 시 정렬 새로고침
-  useEffect(() => {
-    setSortVersion((v) => v + 1);
-  }, [viewingBasic, lineNames]);
+  }, [lineNames, stickyPriorities]);
 
   // 잔업 자동 빠짐 — 확정/보기 중에는 실행하지 않음
   // (readOnly 라도 effect 는 등록, 내부에서 가드)
@@ -521,16 +545,11 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     });
   };
 
-  // 초기화
+  // 초기화 — sticky 도 리셋
   const handleReset = () => {
     if (readOnly) return;
     setAssignments(initialAssignments);
-    setSortVersion((v) => v + 1);
-  };
-
-  // 정렬 새로고침 — 현재 상태 기준으로 다시 정렬
-  const handleResort = () => {
-    setSortVersion((v) => v + 1);
+    setStickyPriorities({});
   };
 
   // 확정 토글 — 잠금이 풀려있으면 현재 assignments 를 스냅샷+잠금, 잠금이면 해제
@@ -556,9 +575,10 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     }
   };
 
-  // 기본 배치 보기 토글
+  // 기본 배치 보기 토글 — 모드 전환 시 sticky 정렬 리셋
   const handleViewBasicToggle = () => {
     setViewingBasic((v) => !v);
+    setStickyPriorities({});
   };
 
   // 화면 표시용 라인 이름 (자동포장라인 → 자동포장)
@@ -606,15 +626,6 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
           </span>
         </h2>
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={handleResort}
-            disabled={viewingBasic}
-            className="text-xs px-3 py-1.5 border border-slate-300 hover:bg-slate-50 rounded disabled:opacity-40 disabled:cursor-not-allowed"
-            title="현재 상태 기준으로 라인 순서 다시 정렬"
-          >
-            정렬 새로고침
-          </button>
           <button
             type="button"
             onClick={handleReset}
