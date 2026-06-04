@@ -452,12 +452,13 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   }, [lineNames, stickyPriorities]);
 
   // 잔업 자동 빠짐 — 확정/보기 중에는 실행하지 않음
-  // (readOnly 라도 effect 는 등록, 내부에서 가드)
-  // 배치된 인원이 실제로 작업할 시간이 < 2h 이면 잔업 셀에서 제거
-  // 기준: 잔여부하(carry) / 잔업 최대 hc 의 rate = 실제 작업해야 할 wall-time
-  //   ex) carry 3인시 + 2명 (rate 2) → 1.5h < 2h → 빠짐
-  //   ex) carry 5인시 + 2명 (rate 2) → 2.5h ≥ 2h → 유지
-  //   ex) carry 0인시 (정규시간에 모두 처리됨) → 무조건 빠짐
+  // 빠짐 조건 (둘 중 하나):
+  //   1) 잔업 셀이 1칸뿐 → 1시간만 운영 = 의미 없음 (배치 자체가 부족)
+  //   2) 잔여부하 0 → 정규시간에 다 끝났는데 잔업에 사람 있음
+  //
+  // 즉, 2칸 이상 배치(=2h+ 운영) 이고 잔여부하가 있으면 유지.
+  // 예: 16:30 합류한 2명이 18:00~21:00 (3칸) 잔업 + 부하 남음 → 유지
+  //     1칸만 채운 경우 → 빠짐 (1h 운영은 비효율)
   useEffect(() => {
     if (readOnly) return;
     const toClear: { worker: string; hours: number[] }[] = [];
@@ -472,13 +473,15 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       const load = loadByLine[line] ?? 0;
       const carry = Math.max(0, load - regularDone);
       let otHc = 0;
+      let otCells = 0;
       for (let h = 8; h < HOUR_COUNT; h++) {
-        otHc = Math.max(otHc, (cellWorkers[line]?.[h] ?? []).length);
+        const cnt = (cellWorkers[line]?.[h] ?? []).length;
+        if (cnt > 0) otCells++;
+        otHc = Math.max(otHc, cnt);
       }
       if (otHc === 0) continue;
-      const otRate = ratePerHour(otHc, isAuto);
-      const workTime = otRate > 0 ? carry / otRate : 0;
-      if (workTime >= 2 - 1e-6) continue;
+      // 유지 조건: 2칸 이상 배치 + 잔여부하 있음
+      if (otCells >= 2 && carry > 1e-6) continue;
       for (let h = 8; h < HOUR_COUNT; h++) {
         const ws = cellWorkers[line]?.[h] ?? [];
         for (const w of ws) {
