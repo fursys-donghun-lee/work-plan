@@ -338,13 +338,17 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   }, [cellWorkers, lineNames, lineMeta, loadByLine, lineWorkers]);
 
 
-  // 시각 atHour 에서 추천 도착 라인 — 재배치 알고리즘과 동일 우선순위:
+  // 시각 atHour 에서 추천 도착 라인 — 우선순위:
   //  1) 긴급(D-1/D-2) 라인 중 2명 미만 (짝 완성 필요)
+  //  ★ 홀수 결과 예외: 솔로 다 채우고 남은 인원이 홀수면 빈 라인 보내봐야
+  //     새 솔로만 생김 → 차라리 부하 큰 라인 우선 (병목 해소)
+  //     ex) 여유 2명 + 솔로 1개 + 빈라인 1개 → 솔로 채우고 1명 남으면 빈라인 가서 또 솔로
+  //         차라리 부하 큰 쪽에 2명 같이 보내서 거기를 짝 완성
   //  2) 솔로(1명) 라인 짝 완성
   //  3) 0명 라인 가동 시작
   //  4) 그 외 잔여 부하 큰 라인 (병목)
   // 제외: 자동포장라인 / 완료 라인 / 이미 짝(2명) 라인
-  const suggestionAt = (atHour: number): string | null => {
+  const suggestionAt = (atHour: number, srcLine?: string): string | null => {
     type Cand = {
       line: string;
       hc: number;
@@ -353,6 +357,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     };
     const cands: Cand[] = [];
     for (const l of lineNames) {
+      if (l === srcLine) continue; // 자기 자신 제외
       const meta = lineMeta[l];
       if (!meta || meta.autoManaged) continue; // 자동라인 제외
       const load = loadByLine[l] ?? 0;
@@ -368,11 +373,28 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
         remaining: load - cum,
       });
     }
-    // 1) 긴급 우선
+    // 1) 긴급 우선 — 무조건 (홀수 예외보다 위)
     const urgentNeed = cands
       .filter((c) => c.urgent)
       .sort((a, b) => a.hc - b.hc || b.remaining - a.remaining);
     if (urgentNeed.length > 0) return urgentNeed[0].line;
+
+    // ★ 홀수 결과 예외 검출
+    //   srcCount = srcLine 의 현재 시각 인원수 (이 가이드 셀의 여유 인원수)
+    //   leftover = srcCount - nSolo (솔로 다 채우고 남는 인원)
+    //   leftover 가 홀수면 빈라인에 1명만 가서 새 솔로 발생 → 부하 큰 라인 우선
+    if (srcLine) {
+      const srcCount = (cellWorkers[srcLine]?.[atHour] ?? []).length;
+      const nSolo = cands.filter((c) => c.hc === 1).length;
+      const leftover = srcCount - nSolo;
+      if (srcCount >= 1 && leftover > 0 && leftover % 2 === 1) {
+        const byLoad = [...cands].sort(
+          (a, b) => b.remaining - a.remaining || a.hc - b.hc
+        );
+        if (byLoad.length > 0) return byLoad[0].line;
+      }
+    }
+
     // 2) 솔로 짝 완성
     const solos = cands
       .filter((c) => c.hc === 1)
@@ -872,7 +894,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
                       }
                     }
                     const wasteful = wasteReason !== null;
-                    const suggested = wasteful ? suggestionAt(s.wt) : null;
+                    const suggested = wasteful ? suggestionAt(s.wt, line) : null;
                     return (
                       <td
                         key={`w-${s.wt}`}
