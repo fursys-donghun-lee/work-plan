@@ -542,7 +542,12 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     e.dataTransfer.dropEffect = "move";
   };
 
-  // 드롭: destHour 부터 destLine 으로, 이전과 같은 값이 이어지는 한 propagate
+  // 드롭: destHour 부터 destLine 으로 propagate
+  //   · 같은 oldLine 셀이 이어지는 한 (기존 동작)
+  //   · 그리고 그 뒤가 빈 셀이면 같이 채움 (잔업 셀 자동 포함)
+  //   예: PA-04 h=2-7 에 있던 워커를 MM-05 로 드래그(h=2) → h=2-7 (PA-04 대체)
+  //       + h=8-10 (빈 셀) 도 MM-05 로 → 잔업까지 자동 연결
+  //   다른 라인 셀이면 break (사용자가 명시적으로 배치한 곳은 건드리지 않음)
   const handleDrop = (
     e: React.DragEvent,
     destLine: string,
@@ -557,7 +562,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       const oldLine = arr[destHour] ?? "";
       if (oldLine === destLine) return prev;
       for (let h = destHour; h < HOUR_COUNT; h++) {
-        if (arr[h] === oldLine) arr[h] = destLine;
+        if (arr[h] === oldLine || arr[h] === "") arr[h] = destLine;
         else break;
       }
       return { ...prev, [worker]: arr };
