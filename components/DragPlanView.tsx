@@ -122,6 +122,30 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     return Array.from(s).sort();
   }, [lineWorkers]);
 
+  // 워커별 라인별 OT 셀 카운트 (잔업 짧음 가이드 + auto-drop 둘 다 사용)
+  const otCellsOfWorker = useMemo(() => {
+    const m: Record<string, Record<string, number>> = {};
+    for (const w of Object.keys(displayAssignments)) {
+      const inner: Record<string, number> = {};
+      for (let h = 8; h < MAX_WORKTIME; h++) {
+        const l = displayAssignments[w]?.[h] ?? "";
+        if (l) inner[l] = (inner[l] ?? 0) + 1;
+      }
+      m[w] = inner;
+    }
+    return m;
+  }, [displayAssignments]);
+
+  // 워커가 excludeLine 이 아닌 다른 라인 OT 에 2칸 이상 있는지
+  const isCommittedElsewhere = (worker: string, excludeLine: string) => {
+    const inner = otCellsOfWorker[worker] ?? {};
+    let count = 0;
+    for (const [l, c] of Object.entries(inner)) {
+      if (l !== excludeLine) count += c;
+    }
+    return count >= 2;
+  };
+
   // mount 시 localStorage 에서 확정계획 복원 (만료 안 됐으면)
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -1001,7 +1025,14 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
                         (lineOTCellsUsed[line] ?? 0) <= 2
                       ) {
                         // 잔업이 2시간 이하 → 빠지거나 이동
-                        wasteReason = "wasteOT";
+                        // 단, 이 셀의 모든 워커가 다른 라인 OT 에 커밋돼있으면
+                        // (= 이미 잔업하기로 한 인원) 짧음 표시 안함
+                        const allCommitted = workers.every((w) =>
+                          isCommittedElsewhere(w, line)
+                        );
+                        if (!allCommitted) {
+                          wasteReason = "wasteOT";
+                        }
                       }
                     }
                     const wasteful = wasteReason !== null;
