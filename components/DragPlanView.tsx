@@ -122,6 +122,20 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     return Array.from(s).sort();
   }, [lineWorkers]);
 
+  // 워커가 임시셀에 들어가는 시각 lookup — 메인 행에서 그 시간만큼 빠짐 처리용
+  const inTempCellLookup = useMemo(() => {
+    const m: Record<string, Set<number>> = {};
+    for (const tc of tempCells) {
+      for (const w of tc.workers) {
+        if (!m[w]) m[w] = new Set<number>();
+        const startH = Math.floor(tc.startWt);
+        const endH = Math.ceil(tc.endWt);
+        for (let h = startH; h < endH; h++) m[w].add(h);
+      }
+    }
+    return m;
+  }, [tempCells]);
+
   // 워커별 라인별 OT 셀 카운트 (잔업 짧음 가이드 + auto-drop 둘 다 사용)
   const otCellsOfWorker = useMemo(() => {
     const m: Record<string, Record<string, number>> = {};
@@ -210,6 +224,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   );
 
   // 라인별·시간별 현재 작업자 (확정 보기 중이면 스냅샷 기준)
+  // 임시셀에 들어간 워커는 그 시각 메인 라인에서 제외 (임시셀 sub-row 에 표시됨)
   const cellWorkers = useMemo(() => {
     const m: Record<string, string[][]> = {};
     for (const line of lineNames) {
@@ -220,12 +235,13 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       for (let h = 0; h < HOUR_COUNT; h++) {
         const line = arr[h];
         if (!line) continue;
+        if (inTempCellLookup[w]?.has(h)) continue; // 임시셀 중 — 메인 라인에서 빠짐
         if (!m[line]) m[line] = Array.from({ length: HOUR_COUNT }, () => []);
         m[line][h].push(w);
       }
     }
     return m;
-  }, [displayAssignments, lineNames]);
+  }, [displayAssignments, lineNames, inTempCellLookup]);
 
   // 라인 부하 lookup
   const loadByLine = useMemo(() => {
@@ -687,11 +703,12 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     });
   };
 
-  // 초기화 — sticky 도 리셋
+  // 초기화 — sticky / 임시셀 도 리셋
   const handleReset = () => {
     if (readOnly) return;
     setAssignments(initialAssignments);
     setStickyPriorities({});
+    setTempCells([]);
   };
 
   // 확정 토글 — 잠금이 풀려있으면 현재 assignments 를 스냅샷+잠금, 잠금이면 해제
