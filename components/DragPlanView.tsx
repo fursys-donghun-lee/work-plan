@@ -4,10 +4,19 @@ import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   formatHM,
+  workTimeToWall,
   MAX_WORKTIME,
   type ReallocResult,
   type ReallocSegment,
 } from "@/lib/calc/reallocation";
+
+type ManualTempCell = {
+  id: string;
+  line: string;
+  startWt: number;
+  endWt: number;
+  workers: string[];
+};
 import { RealMetricsPanel } from "@/components/RealMetricsPanel";
 import { ImprovementSummary } from "@/components/ImprovementSummary";
 
@@ -58,6 +67,60 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   const displayAssignments = viewingBasic ? initialAssignments : assignments;
 
   const readOnly = locked || viewingBasic;
+
+  // 임시셀 — 라인을 클릭해서 작업자·시간 구성, 그 시간만큼 부하 처리에 더해줌
+  const [tempCells, setTempCells] = useState<ManualTempCell[]>([]);
+  const [tempCellModalLine, setTempCellModalLine] = useState<string | null>(
+    null
+  );
+
+  // 임시셀 라인별 시간당 처리량 (h=0..10)
+  const tcContribByLine = useMemo(() => {
+    const m: Record<string, number[]> = {};
+    for (const tc of tempCells) {
+      if (!m[tc.line])
+        m[tc.line] = Array.from({ length: MAX_WORKTIME }, () => 0);
+      const rate =
+        tc.workers.length <= 0 ? 0 : tc.workers.length === 1 ? 0.6 : 2;
+      for (let h = 0; h < MAX_WORKTIME; h++) {
+        const overlap = Math.max(
+          0,
+          Math.min(h + 1, tc.endWt) - Math.max(h, tc.startWt)
+        );
+        m[tc.line][h] += overlap * rate;
+      }
+    }
+    return m;
+  }, [tempCells]);
+
+  // 임시셀 라인별 총 처리량 (인시)
+  const tempCellDoneByLine = useMemo(() => {
+    const m: Record<string, number> = {};
+    for (const tc of tempCells) {
+      const span = Math.max(0, tc.endWt - tc.startWt);
+      const rate =
+        tc.workers.length <= 0 ? 0 : tc.workers.length === 1 ? 0.6 : 2;
+      m[tc.line] = (m[tc.line] ?? 0) + span * rate;
+    }
+    return m;
+  }, [tempCells]);
+
+  // 임시셀 라인별 목록
+  const tempCellsByLine = useMemo(() => {
+    const m: Record<string, ManualTempCell[]> = {};
+    for (const tc of tempCells) {
+      if (!m[tc.line]) m[tc.line] = [];
+      m[tc.line].push(tc);
+    }
+    return m;
+  }, [tempCells]);
+
+  // 모든 작업자 이름 (임시셀 모달용)
+  const allWorkerNames = useMemo(() => {
+    const s = new Set<string>();
+    for (const ws of Object.values(lineWorkers)) for (const w of ws) s.add(w);
+    return Array.from(s).sort();
+  }, [lineWorkers]);
 
   // mount 시 localStorage 에서 확정계획 복원 (만료 안 됐으면)
   useEffect(() => {
@@ -156,7 +219,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     return m;
   }, [result.timelines]);
 
-  // 라인별 누적 처리 부하 + 완료 시각 계산 (자동라인은 페널티 없음)
+  // 라인별 누적 처리 부하 + 완료 시각 계산 (자동라인은 페널티 없음, 임시셀 처리량 가산)
   const tracking = useMemo(() => {
     type LineTrack = {
       byHour: number[];
@@ -173,6 +236,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       for (let h = 0; h < HOUR_COUNT; h++) {
         const cnt = (cellWorkers[line]?.[h] ?? []).length;
         cum += ratePerHour(cnt, isAuto);
+        cum += tcContribByLine[line]?.[h] ?? 0;
         byHour[h] = cum;
         if (completion === null && load > 0.01 && cum >= load - 0.01) {
           completion = h;
@@ -181,7 +245,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       out[line] = { byHour, completionHour: completion, total: cum };
     }
     return out;
-  }, [cellWorkers, lineNames, loadByLine, lineMetaEarly]);
+  }, [cellWorkers, lineNames, loadByLine, lineMetaEarly, tcContribByLine]);
 
   // 라인별 부하 영역 — 첫 작업자 배치 시점부터 2명 짝 기준 필요한 셀 수
   // (인원이 10:30부터 이동되면 10:30부터 배경 시작)
@@ -509,6 +573,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       for (let h = 0; h < 8; h++) {
         const cnt = (cellWorkers[line]?.[h] ?? []).length;
         regularDone += ratePerHour(cnt, isAuto);
+        regularDone += tcContribByLine[line]?.[h] ?? 0;
       }
       const load = loadByLine[line] ?? 0;
       const carry = Math.max(0, load - regularDone);
@@ -541,7 +606,15 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       }
       return next;
     });
-  }, [cellWorkers, lineNames, lineMeta, loadByLine, assignments, readOnly]);
+  }, [
+    cellWorkers,
+    lineNames,
+    lineMeta,
+    loadByLine,
+    assignments,
+    tcContribByLine,
+    readOnly,
+  ]);
 
   // 드래그 핸들러
   const [dragging, setDragging] = useState<string | null>(null);
@@ -820,12 +893,30 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
               }
               return (
                 <tr key={line}>
-                  <th className="sticky left-0 bg-white border-b border-slate-100 pl-2 pr-1 py-1 text-left font-medium text-slate-700">
+                  <th
+                    onClick={() =>
+                      !readOnly && !isAuto && setTempCellModalLine(line)
+                    }
+                    className={cn(
+                      "sticky left-0 bg-white border-b border-slate-100 pl-2 pr-1 py-1 text-left font-medium text-slate-700",
+                      !readOnly && !isAuto && "cursor-pointer hover:bg-slate-50"
+                    )}
+                    title={
+                      readOnly || isAuto
+                        ? undefined
+                        : "클릭해서 임시셀 구성"
+                    }
+                  >
                     <div className="truncate text-xs">
                       {result.timelines.find((t) => t.name === line)?.urgent &&
                         "● "}
                       {displayName(line)}
                     </div>
+                    {tempCellsByLine[line]?.length > 0 && (
+                      <div className="text-[9px] text-purple-700 font-semibold leading-tight whitespace-nowrap">
+                        +임시 {(tempCellDoneByLine[line] ?? 0).toFixed(1)}인시
+                      </div>
+                    )}
                   </th>
                   <td className="border-b border-slate-100 pl-0 pr-1 py-1 text-center align-middle">
                     {statusBadge ? (
@@ -1024,8 +1115,230 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
         </span>
         <span className="w-full" />
         <span>· 드래그로 작업자 이동 · 드롭 시 그 시각부터 같은 라인이 이어지는 한 자동 전파</span>
+        <span>· 라인 라벨 클릭해서 임시셀 구성</span>
       </div>
     </div>
+    {/* 임시셀 구성 모달 */}
+    {tempCellModalLine && (
+      <TempCellModal
+        line={tempCellModalLine}
+        displayName={displayName(tempCellModalLine)}
+        allWorkers={allWorkerNames}
+        existing={tempCellsByLine[tempCellModalLine] ?? []}
+        onAdd={(tc) => setTempCells((prev) => [...prev, tc])}
+        onRemove={(id) =>
+          setTempCells((prev) => prev.filter((t) => t.id !== id))
+        }
+        onClose={() => setTempCellModalLine(null)}
+      />
+    )}
     </>
+  );
+}
+
+// 임시셀 구성 모달 — 라인을 누르면 열리고 작업자·시간 선택해서 부하 처리에 더함
+function TempCellModal({
+  line,
+  displayName,
+  allWorkers,
+  existing,
+  onAdd,
+  onRemove,
+  onClose,
+}: {
+  line: string;
+  displayName: string;
+  allWorkers: string[];
+  existing: ManualTempCell[];
+  onAdd: (tc: ManualTempCell) => void;
+  onRemove: (id: string) => void;
+  onClose: () => void;
+}) {
+  const [startWt, setStartWt] = useState(8);
+  const [endWt, setEndWt] = useState(11);
+  const [selectedWorkers, setSelectedWorkers] = useState<string[]>([]);
+
+  const span = Math.max(0, endWt - startWt);
+  const rate =
+    selectedWorkers.length <= 0
+      ? 0
+      : selectedWorkers.length === 1
+        ? 0.6
+        : 2;
+  const processed = span * rate;
+
+  const toggleWorker = (w: string) => {
+    setSelectedWorkers((prev) =>
+      prev.includes(w) ? prev.filter((x) => x !== w) : [...prev, w]
+    );
+  };
+
+  const handleAdd = () => {
+    if (selectedWorkers.length === 0 || span <= 0) return;
+    onAdd({
+      id: `tc-${line}-${startWt}-${endWt}-${selectedWorkers.join("_")}-${existing.length}`,
+      line,
+      startWt,
+      endWt,
+      workers: [...selectedWorkers],
+    });
+    setSelectedWorkers([]);
+  };
+
+  const timeOptions: { wt: number; label: string }[] = [];
+  for (let t = 0; t <= MAX_WORKTIME; t++) {
+    timeOptions.push({ wt: t, label: formatHM(workTimeToWall(t)) });
+  }
+
+  return (
+    <div
+      className="fixed inset-0 bg-black/40 flex items-center justify-center z-50"
+      onClick={onClose}
+    >
+      <div
+        className="bg-white rounded-lg shadow-xl p-5 max-w-xl w-full m-4 max-h-[90vh] overflow-y-auto"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex justify-between items-center mb-4">
+          <h3 className="text-base font-semibold text-slate-900">
+            {displayName} — 임시셀 구성
+          </h3>
+          <button
+            onClick={onClose}
+            className="text-slate-400 hover:text-slate-700 text-xl leading-none"
+            title="닫기"
+          >
+            ✕
+          </button>
+        </div>
+        <p className="text-xs text-slate-500 mb-3">
+          작업자와 시간을 선택하면 그 시간만큼 해당 라인의 부하가 처리됩니다.
+        </p>
+
+        {/* 새 임시셀 추가 */}
+        <div className="border border-slate-200 rounded p-3 mb-3 bg-slate-50/50">
+          <div className="grid grid-cols-2 gap-3 mb-3">
+            <label className="text-xs">
+              <span className="text-slate-500 block mb-1">시작 시각</span>
+              <select
+                value={startWt}
+                onChange={(e) => setStartWt(Number(e.target.value))}
+                className="w-full text-sm border border-slate-300 rounded px-2 py-1"
+              >
+                {timeOptions
+                  .filter((o) => o.wt < MAX_WORKTIME)
+                  .map((o) => (
+                    <option key={o.wt} value={o.wt}>
+                      {o.label}
+                    </option>
+                  ))}
+              </select>
+            </label>
+            <label className="text-xs">
+              <span className="text-slate-500 block mb-1">종료 시각</span>
+              <select
+                value={endWt}
+                onChange={(e) => setEndWt(Number(e.target.value))}
+                className="w-full text-sm border border-slate-300 rounded px-2 py-1"
+              >
+                {timeOptions
+                  .filter((o) => o.wt > startWt)
+                  .map((o) => (
+                    <option key={o.wt} value={o.wt}>
+                      {o.label}
+                    </option>
+                  ))}
+              </select>
+            </label>
+          </div>
+          <div className="mb-3">
+            <div className="text-xs text-slate-500 mb-1">
+              작업자 (여러명 가능)
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {allWorkers.map((w) => (
+                <button
+                  key={w}
+                  type="button"
+                  onClick={() => toggleWorker(w)}
+                  className={cn(
+                    "text-xs px-2 py-1 rounded border font-medium",
+                    selectedWorkers.includes(w)
+                      ? "bg-purple-500 text-white border-purple-500"
+                      : "border-slate-300 hover:bg-slate-50 text-slate-700"
+                  )}
+                >
+                  {w}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center justify-between">
+            <div className="text-xs text-slate-600">
+              {span}h × {selectedWorkers.length}명 →{" "}
+              <b className="text-emerald-700">{processed.toFixed(1)}인시</b>
+              {selectedWorkers.length === 1 && " (1인 60%)"}
+            </div>
+            <button
+              type="button"
+              onClick={handleAdd}
+              disabled={selectedWorkers.length === 0 || span <= 0}
+              className="text-xs px-3 py-1.5 bg-blue-600 hover:bg-blue-700 text-white font-semibold rounded disabled:opacity-40 disabled:cursor-not-allowed"
+            >
+              임시셀 추가
+            </button>
+          </div>
+        </div>
+
+        {/* 기존 임시셀 목록 */}
+        {existing.length > 0 ? (
+          <div>
+            <h4 className="text-sm font-semibold text-slate-700 mb-2">
+              현재 임시셀 ({existing.length}개)
+            </h4>
+            <ul className="space-y-1">
+              {existing.map((tc) => {
+                const tcSpan = Math.max(0, tc.endWt - tc.startWt);
+                const tcRate =
+                  tc.workers.length <= 0
+                    ? 0
+                    : tc.workers.length === 1
+                      ? 0.6
+                      : 2;
+                const tcProcessed = tcSpan * tcRate;
+                return (
+                  <li
+                    key={tc.id}
+                    className="flex justify-between items-center bg-yellow-50 border border-yellow-200 rounded px-2 py-1.5"
+                  >
+                    <div className="text-xs text-slate-700">
+                      <b>{formatHM(workTimeToWall(tc.startWt))}</b>~
+                      <b>{formatHM(workTimeToWall(tc.endWt))}</b>
+                      <span className="text-slate-500"> · </span>
+                      {tc.workers.join(", ")}
+                      <span className="text-slate-500"> · </span>
+                      <span className="text-emerald-700 font-semibold">
+                        {tcProcessed.toFixed(1)}인시
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => onRemove(tc.id)}
+                      className="text-slate-400 hover:text-rose-600 text-sm"
+                      title="삭제"
+                    >
+                      ✕
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500 text-center py-2">
+            등록된 임시셀이 없습니다.
+          </p>
+        )}
+      </div>
+    </div>
   );
 }
