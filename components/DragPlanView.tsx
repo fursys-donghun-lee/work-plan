@@ -476,10 +476,31 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   // 잔업 자동 빠짐 — 확정/보기 중에는 실행하지 않음
   // 빠짐 조건: 잔여부하(carry) < 2인시 (정규시간에 거의 다 끝났음)
   // 유지: 잔여부하 ≥ 2인시 → 잔업할 일이 있음 → 인원 그대로 잔업 진행
-  //   · 1명이든 2명이든, 1칸이든 3칸이든, 일이 있으면 잔업
-  //   · 재배치돼서 늦게 합류한 인원도 부하만 있으면 잔업 유지
+  // 예외 (커밋된 잔업 인원):
+  //   다른 라인 OT 셀에 2칸 이상 있는 워커는 어차피 잔업하기로 한 사람이므로,
+  //   carry < 2 인 라인에 1h 만 잠깐 와있어도 그 1h 잔업 유지.
+  //   예) A(h=8,9) 잔업 + 그 후 B(h=10) 1h → B carry < 2 라도 유지
   useEffect(() => {
     if (readOnly) return;
+    // 워커별 라인별 OT 셀 카운트 (∑h=8..10)
+    const otCellsOfWorker: Record<string, Record<string, number>> = {};
+    for (const w of Object.keys(assignments)) {
+      const m: Record<string, number> = {};
+      for (let h = 8; h < HOUR_COUNT; h++) {
+        const l = assignments[w]?.[h] ?? "";
+        if (l) m[l] = (m[l] ?? 0) + 1;
+      }
+      otCellsOfWorker[w] = m;
+    }
+    const isCommittedElsewhere = (w: string, excludeLine: string): boolean => {
+      const m = otCellsOfWorker[w] ?? {};
+      let count = 0;
+      for (const [l, c] of Object.entries(m)) {
+        if (l !== excludeLine) count += c;
+      }
+      return count >= 2;
+    };
+
     const toClear: { worker: string; hours: number[] }[] = [];
     for (const line of lineNames) {
       const isAuto = lineMeta[line]?.autoManaged ?? false;
@@ -496,11 +517,11 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
         otHc = Math.max(otHc, (cellWorkers[line]?.[h] ?? []).length);
       }
       if (otHc === 0) continue;
-      // 유지 조건: 잔여부하 ≥ 2인시
       if (carry >= 2 - 1e-6) continue;
       for (let h = 8; h < HOUR_COUNT; h++) {
         const ws = cellWorkers[line]?.[h] ?? [];
         for (const w of ws) {
+          if (isCommittedElsewhere(w, line)) continue; // 잔업 커밋 인원 유지
           let entry = toClear.find((u) => u.worker === w);
           if (!entry) {
             entry = { worker: w, hours: [] };
@@ -520,7 +541,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       }
       return next;
     });
-  }, [cellWorkers, lineNames, lineMeta, loadByLine, readOnly]);
+  }, [cellWorkers, lineNames, lineMeta, loadByLine, assignments, readOnly]);
 
   // 드래그 핸들러
   const [dragging, setDragging] = useState<string | null>(null);
