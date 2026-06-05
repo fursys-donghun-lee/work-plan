@@ -1117,7 +1117,76 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
                   })}
                 </tr>
               );
-            })}
+            })
+            .reduce<React.ReactNode[]>((acc, node, idx) => {
+              acc.push(node);
+              const line = displayLines[idx];
+              const cells = tempCellsByLine[line] ?? [];
+              for (const tc of cells) {
+                const tcSpan = Math.max(0, tc.endWt - tc.startWt);
+                const tcRate =
+                  tc.workers.length <= 0
+                    ? 0
+                    : tc.workers.length === 1
+                      ? 0.6
+                      : 2;
+                const tcProcessed = tcSpan * tcRate;
+                acc.push(
+                  <tr
+                    key={`${line}-tc-${tc.id}`}
+                    className="bg-purple-50/40"
+                  >
+                    <th className="sticky left-0 bg-purple-50/40 border-b border-slate-200 pl-2 pr-1 py-1 text-left">
+                      <div className="text-[9px] text-purple-700 font-semibold truncate">
+                        ↳ 임시셀
+                      </div>
+                    </th>
+                    <td className="border-b border-slate-200 px-0 py-1 text-center text-[9px] text-purple-700">
+                      {tc.workers.length}명
+                    </td>
+                    <td className="border-b border-slate-200 px-1 py-1 text-center text-[10px] text-purple-800 font-semibold">
+                      {tcProcessed.toFixed(1)}
+                    </td>
+                    {slots.map((s, sIdx) => {
+                      if (s.type === "break") {
+                        return (
+                          <td
+                            key={`tc-${tc.id}-brk-${sIdx}`}
+                            className="border-b border-slate-200 bg-slate-200/30"
+                          />
+                        );
+                      }
+                      const inCell =
+                        s.wt >= tc.startWt && s.wt < tc.endWt;
+                      return (
+                        <td
+                          key={`tc-${tc.id}-w-${s.wt}`}
+                          className={cn(
+                            "border-b border-slate-200 px-0 py-0.5 text-center align-middle",
+                            inCell && "bg-purple-100/60"
+                          )}
+                        >
+                          {inCell && tc.workers.length > 0 && (
+                            <div className="flex flex-wrap gap-0.5 justify-center px-0.5">
+                              {tc.workers.map((w) => (
+                                <div
+                                  key={w}
+                                  className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-purple-100 border-2 border-dashed border-purple-500 text-purple-800 whitespace-nowrap"
+                                  title={`임시셀 — ${w}`}
+                                >
+                                  {w}
+                                </div>
+                              ))}
+                            </div>
+                          )}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                );
+              }
+              return acc;
+            }, [])}
           </tbody>
         </table>
       </div>
@@ -1143,6 +1212,10 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
         <span className="inline-flex items-center gap-1">
           <span className="w-3 h-3 rounded bg-amber-50 border-2 border-amber-400 inline-block" />
           여유 (인원이동 가이드 표시)
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="w-3 h-3 rounded bg-purple-100 border-2 border-dashed border-purple-500 inline-block" />
+          임시셀 (라인 클릭으로 구성)
         </span>
         <span className="w-full" />
         <span>· 드래그로 작업자 이동 · 드롭 시 그 시각부터 같은 라인이 이어지는 한 자동 전파</span>
@@ -1216,9 +1289,20 @@ function TempCellModal({
     setSelectedWorkers([]);
   };
 
-  const timeOptions: { wt: number; label: string }[] = [];
-  for (let t = 0; t <= MAX_WORKTIME; t++) {
-    timeOptions.push({ wt: t, label: formatHM(workTimeToWall(t)) });
+  // 시작 시각 옵션 — wt=4, 8 은 휴게 직후(=다음 작업 시작) 시각으로 표시
+  //   · wt=4 → 13:30 (점심 후 시작), wt=8 → 18:00 (저녁 후 잔업 시작)
+  const startOptions: { wt: number; label: string }[] = [];
+  for (let t = 0; t < MAX_WORKTIME; t++) {
+    let wall = workTimeToWall(t);
+    if (t === 4) wall = 13.5;
+    if (t === 8) wall = 18.0;
+    startOptions.push({ wt: t, label: formatHM(wall) });
+  }
+  // 종료 시각 옵션 — 휴게 직전(=직전 작업 종료) 시각 그대로
+  //   · wt=4 → 12:30 (점심 직전 종료), wt=8 → 17:30 (저녁 직전 종료)
+  const endOptions: { wt: number; label: string }[] = [];
+  for (let t = 1; t <= MAX_WORKTIME; t++) {
+    endOptions.push({ wt: t, label: formatHM(workTimeToWall(t)) });
   }
 
   return (
@@ -1256,13 +1340,11 @@ function TempCellModal({
                 onChange={(e) => setStartWt(Number(e.target.value))}
                 className="w-full text-sm border border-slate-300 rounded px-2 py-1"
               >
-                {timeOptions
-                  .filter((o) => o.wt < MAX_WORKTIME)
-                  .map((o) => (
-                    <option key={o.wt} value={o.wt}>
-                      {o.label}
-                    </option>
-                  ))}
+                {startOptions.map((o) => (
+                  <option key={o.wt} value={o.wt}>
+                    {o.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label className="text-xs">
@@ -1272,7 +1354,7 @@ function TempCellModal({
                 onChange={(e) => setEndWt(Number(e.target.value))}
                 className="w-full text-sm border border-slate-300 rounded px-2 py-1"
               >
-                {timeOptions
+                {endOptions
                   .filter((o) => o.wt > startWt)
                   .map((o) => (
                     <option key={o.wt} value={o.wt}>
