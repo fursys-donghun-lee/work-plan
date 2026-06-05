@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import { useDataStore } from "@/lib/store/useDataStore";
-import { getDb, isFirebaseConfigured } from "@/lib/firebase";
+import { getDb, getAuthInstance, isFirebaseConfigured } from "@/lib/firebase";
 import {
   doc,
   getDoc,
@@ -10,6 +10,7 @@ import {
   setDoc,
   serverTimestamp,
 } from "firebase/firestore";
+import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
 // Firestore 단일 문서 (state/main) 에 store 데이터를 통째로 저장.
 // 변경 시 onSnapshot 으로 모든 클라이언트에 즉시 반영.
@@ -184,13 +185,57 @@ function mergePreserveLocal(
   return { merged, preservedFromLocal };
 }
 
+// 동기화 상태 — 우상단 작은 배지로 노출
+type SyncStatus =
+  | { kind: "init" }
+  | { kind: "auth-waiting" }
+  | { kind: "auth-failed"; reason: string }
+  | { kind: "ok" }
+  | { kind: "writing" }
+  | { kind: "write-failed"; reason: string }
+  | { kind: "no-config" };
+
 export function SyncProvider({ children }: { children: React.ReactNode }) {
   const [, setHydrated] = useState(false);
+  const [status, setStatus] = useState<SyncStatus>({ kind: "init" });
+  const [authReady, setAuthReady] = useState(false);
   const lastWriteRef = useRef<string>("");
   const ignoreNextRemoteRef = useRef<boolean>(false);
-  // 로컬 변경이 디바운스/전송 진행 중. 이 동안 원격 snapshot 무시.
-  // (clear는 우리 자신의 write 가 snapshot 으로 돌아왔을 때만 — 또는 에러 시)
   const localPendingRef = useRef<boolean>(false);
+
+  // 0) 익명 인증 — Firestore 규칙(request.auth != null) 통과용
+  useEffect(() => {
+    if (!isFirebaseConfigured()) {
+      setStatus({ kind: "no-config" });
+      setHydrated(true);
+      setAuthReady(true);
+      return;
+    }
+    setStatus({ kind: "auth-waiting" });
+    const auth = getAuthInstance();
+    const unsub = onAuthStateChanged(auth, (user) => {
+      if (user) {
+        setAuthReady(true);
+        setStatus({ kind: "ok" });
+      } else {
+        // 미로그인이면 익명 로그인 시도
+        signInAnonymously(auth).catch((e) => {
+          const code = (e as { code?: string })?.code ?? String(e);
+          console.error("[SyncProvider] anonymous sign-in failed", e);
+          setStatus({
+            kind: "auth-failed",
+            reason:
+              code === "auth/operation-not-allowed"
+                ? "Firebase 콘솔에서 익명 인증을 활성화 해주세요 (Auth → Sign-in method → Anonymous)"
+                : code,
+          });
+          setHydrated(true);
+          setAuthReady(false);
+        });
+      }
+    });
+    return () => unsub();
+  }, []);
 
   // 1) Firestore 실시간 구독
   useEffect(() => {
@@ -201,6 +246,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       setHydrated(true);
       return;
     }
+    if (!authReady) return; // 인증 완료 후 구독
 
     const db = getDb();
     const ref = doc(db, ...STATE_DOC_PATH);
@@ -279,11 +325,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       }
     );
     return () => unsub();
-  }, []);
+  }, [authReady]);
 
   // 2) store 변경 → Firestore 쓰기 (디바운스)
   useEffect(() => {
     if (!isFirebaseConfigured()) return;
+    if (!authReady) return;
     const db = getDb();
     const ref = doc(db, ...STATE_DOC_PATH);
 
@@ -314,6 +361,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         return;
       }
       inflight = true;
+      setStatus({ kind: "writing" });
       try {
         // 1) 마지막으로 sync 된 값 복원 (변경 감지 기준점)
         let lastWritten: Record<string, unknown> = {};
@@ -356,8 +404,19 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           _updatedAt: serverTimestamp(),
         });
         lastWriteRef.current = mergedBody;
+        setStatus({ kind: "ok" });
       } catch (e) {
-        console.warn("[SyncProvider] write 실패", e);
+        const code = (e as { code?: string })?.code ?? String(e);
+        console.error("[SyncProvider] write 실패", e);
+        setStatus({
+          kind: "write-failed",
+          reason:
+            code === "permission-denied"
+              ? "Firestore 권한 오류 — 보안 규칙 확인 필요"
+              : code.includes("resource-exhausted")
+                ? "Firestore 용량 초과 — 문서가 너무 큼 (1MB 제한)"
+                : code,
+        });
         localPendingRef.current = false;
       } finally {
         inflight = false;
@@ -391,7 +450,69 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (timer) clearTimeout(timer);
       unsub();
     };
-  }, []);
+  }, [authReady]);
 
-  return <>{children}</>;
+  return (
+    <>
+      {children}
+      <SyncStatusBadge status={status} />
+    </>
+  );
+}
+
+function SyncStatusBadge({ status }: { status: SyncStatus }) {
+  if (status.kind === "ok") {
+    return (
+      <div
+        className="fixed bottom-3 left-3 text-[10px] px-2 py-1 rounded bg-emerald-50 border border-emerald-200 text-emerald-700 z-50 pointer-events-none"
+        title="모든 PC 동기화 정상"
+      >
+        ● 동기화 OK
+      </div>
+    );
+  }
+  if (status.kind === "writing") {
+    return (
+      <div className="fixed bottom-3 left-3 text-[10px] px-2 py-1 rounded bg-sky-50 border border-sky-200 text-sky-700 z-50 pointer-events-none">
+        ⟳ 저장 중…
+      </div>
+    );
+  }
+  if (status.kind === "auth-waiting" || status.kind === "init") {
+    return (
+      <div className="fixed bottom-3 left-3 text-[10px] px-2 py-1 rounded bg-slate-50 border border-slate-200 text-slate-600 z-50 pointer-events-none">
+        ⟳ 연결 중…
+      </div>
+    );
+  }
+  if (status.kind === "auth-failed") {
+    return (
+      <div
+        className="fixed bottom-3 left-3 text-[11px] px-3 py-2 rounded bg-rose-50 border border-rose-300 text-rose-800 z-50 max-w-md shadow"
+        title={status.reason}
+      >
+        <div className="font-bold">⚠ 동기화 인증 실패</div>
+        <div className="text-[10px]">{status.reason}</div>
+      </div>
+    );
+  }
+  if (status.kind === "write-failed") {
+    return (
+      <div
+        className="fixed bottom-3 left-3 text-[11px] px-3 py-2 rounded bg-rose-50 border border-rose-300 text-rose-800 z-50 max-w-md shadow"
+        title={status.reason}
+      >
+        <div className="font-bold">⚠ 저장 실패</div>
+        <div className="text-[10px]">{status.reason}</div>
+      </div>
+    );
+  }
+  if (status.kind === "no-config") {
+    return (
+      <div className="fixed bottom-3 left-3 text-[10px] px-2 py-1 rounded bg-amber-50 border border-amber-200 text-amber-700 z-50 pointer-events-none">
+        ⚠ Firebase 미설정 — 로컬만 저장
+      </div>
+    );
+  }
+  return null;
 }
