@@ -12,9 +12,18 @@ import {
 } from "firebase/firestore";
 import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
-// Firestore 단일 문서 (state/main) 에 store 데이터를 통째로 저장.
-// 변경 시 onSnapshot 으로 모든 클라이언트에 즉시 반영.
+// Firestore 분리 저장:
+// - state/main: heavy data (employees, attendance, loadPlan 등) — 변경 빈도 낮음
+// - state/plan: 수동 배치 잔업 인원 (manualPlan*) — 빈번한 변경, 격리 필요
+//   (확정/임시셀 변경 시 heavy data 와 함께 쓰지 않아 1MB 한계/충돌 회피)
 const STATE_DOC_PATH = ["state", "main"] as const;
+const PLAN_DOC_PATH = ["state", "plan"] as const;
+const PLAN_KEYS = [
+  "manualPlanOvertimeBasic",
+  "manualPlanOvertimeConfirmed",
+  "manualPlanFeederOvertimeBasic",
+  "manualPlanFeederOvertimeConfirmed",
+] as const;
 
 const SYNCED_KEYS = [
   "employees",
@@ -48,12 +57,8 @@ const SYNCED_KEYS = [
   "package2SupportPlacements",
   "package2GroupMerges",
   "overtimeConfirmed",
-  "manualPlanOvertimeBasic",
-  "manualPlanOvertimeConfirmed",
-  "manualPlanFeederOvertimeBasic",
-  "manualPlanFeederOvertimeConfirmed",
-  // uploadLog 는 sync 제외 — 문서 크기 1MB 초과 방지
-  // (각 PC 에 localStorage 에만 유지)
+  // manualPlan* 4개는 state/plan 별도 문서로 분리 sync (PLAN_KEYS)
+  // uploadLog 는 sync 제외 — 문서 크기 1MB 초과 방지 (localStorage 만 유지)
 ] as const;
 
 function pickSynced(state: Record<string, unknown>): Record<string, unknown> {
@@ -187,27 +192,7 @@ function mergePreserveLocal(
     }
   }
 
-  // 5. manualPlan* 수치 필드 — 로컬이 양수면 원격 0/undefined 가 덮어쓰지 않게
-  //    (쓰기 실패 후 stale snapshot 이 로컬 계산값을 0으로 리셋하는 문제 방지)
-  const MANUAL_PLAN_NUM_KEYS = [
-    "manualPlanOvertimeBasic",
-    "manualPlanOvertimeConfirmed",
-    "manualPlanFeederOvertimeBasic",
-    "manualPlanFeederOvertimeConfirmed",
-  ] as const;
-  for (const k of MANUAL_PLAN_NUM_KEYS) {
-    const r = (remote as Record<string, unknown>)[k];
-    const l = (local as Record<string, unknown>)[k];
-    if (
-      typeof l === "number" &&
-      l > 0 &&
-      (typeof r !== "number" || r === 0)
-    ) {
-      merged[k] = l;
-      preservedFromLocal = true;
-    }
-  }
-
+  // manualPlan* 필드는 state/plan 으로 분리됨 — main 머지에선 다루지 않음
   return { merged, preservedFromLocal };
 }
 
@@ -503,6 +488,85 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     return () => {
       if (timer) clearTimeout(timer);
       unsub();
+    };
+  }, [authReady]);
+
+  // 3) state/plan 별도 문서 sync — manualPlan* 4개 필드
+  // heavy data 와 격리: 임시셀 추가/확정 변경 시 큰 문서 안 건드림
+  useEffect(() => {
+    if (!isFirebaseConfigured()) return;
+    if (!authReady) return;
+    const db = getDb();
+    const ref = doc(db, ...PLAN_DOC_PATH);
+
+    // 구독: 원격 변경 → 로컬 store 반영
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) return;
+        const data = snap.data() ?? {};
+        const update: Record<string, unknown> = {};
+        let changed = false;
+        const local = useDataStore.getState() as unknown as Record<
+          string,
+          unknown
+        >;
+        for (const k of PLAN_KEYS) {
+          const r = data[k];
+          if (typeof r === "number" && r !== local[k]) {
+            update[k] = r;
+            changed = true;
+          }
+        }
+        if (changed) {
+          useDataStore.setState(update as never, false);
+        }
+      },
+      (err) => console.warn("[SyncProvider/plan] onSnapshot", err)
+    );
+
+    // 쓰기: store 변경 시 디바운스 후 push
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastWritten = "";
+    const flush = async () => {
+      const local = useDataStore.getState() as unknown as Record<
+        string,
+        unknown
+      >;
+      const payload: Record<string, unknown> = {};
+      for (const k of PLAN_KEYS) payload[k] = local[k] ?? 0;
+      const body = JSON.stringify(payload);
+      if (body === lastWritten) return;
+      try {
+        await setDoc(ref, { ...payload, _updatedAt: serverTimestamp() });
+        lastWritten = body;
+      } catch (e) {
+        // plan 문서 쓰기 실패는 main 보다 덜 critical — 콘솔만, 메인 status 영향 X
+        console.warn("[SyncProvider/plan] write 실패", e);
+      }
+    };
+
+    const unsubStore = useDataStore.subscribe((curr, prev) => {
+      // PLAN_KEYS 중 변경된 게 있는지 확인
+      let changed = false;
+      for (const k of PLAN_KEYS) {
+        if (
+          (curr as unknown as Record<string, unknown>)[k] !==
+          (prev as unknown as Record<string, unknown>)[k]
+        ) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(flush, 800);
+    });
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsub();
+      unsubStore();
     };
   }, [authReady]);
 
