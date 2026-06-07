@@ -434,6 +434,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       totalCarry += t.carryHours;
       totalLoad += t.loadHours;
     }
+    const lineHasOTSet = new Set<string>();
     for (const line of lineNames) {
       const isAuto = lineMeta[line]?.autoManaged ?? false;
       let otCells = 0;
@@ -442,7 +443,6 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
         const cnt = (cw[line]?.[h] ?? []).length;
         const r = ratePerHour(cnt, isAuto);
         const tcAtH = tcContribByLine[line]?.[h] ?? 0;
-        // 임시셀 워커 수 (이 라인, 이 시각에 활성인 임시셀들의 인원 합)
         const tcWorkersAtH = tempCells.reduce((s, tc) => {
           if (tc.line === line && h >= tc.startWt && h < tc.endWt) {
             return s + tc.workers.length;
@@ -461,8 +461,27 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
           }
         }
       }
-      if (otCells >= 2) overtimePeople += maxOtHc;
+      if (otCells >= 2) {
+        overtimePeople += maxOtHc;
+        lineHasOTSet.add(line);
+      }
     }
+
+    // 피더 잔업 (대림 포장2라인)
+    // Group A: PA-01~05, MM-01~04 — '라인에 작업이 있으면' (load > 0) → 김성욱·유인섭
+    // Group B: PA-06~08, MA-01~03, MM-05 — '라인에 잔업이 있으면' → 진영기·박동호
+    const GROUP_A = [
+      "PA-01", "PA-02", "PA-03", "PA-04", "PA-05",
+      "MM-01", "MM-02", "MM-03", "MM-04",
+    ];
+    const GROUP_B = [
+      "PA-06", "PA-07", "PA-08",
+      "MA-01", "MA-02", "MA-03", "MM-05",
+    ];
+    const groupAHasLoad = GROUP_A.some((l) => (loadByLine[l] ?? 0) > 0.01);
+    const groupBHasOT = GROUP_B.some((l) => lineHasOTSet.has(l));
+    if (groupAHasLoad) overtimePeople += 2; // 김성욱, 유인섭
+    if (groupBHasOT) overtimePeople += 2; // 진영기, 박동호
 
     const availableLoad = totalPeople * STANDARD;
     const regularIdle = Math.max(0, availableLoad - regularWork);
