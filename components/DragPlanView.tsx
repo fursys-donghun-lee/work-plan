@@ -372,11 +372,19 @@ export function DragPlanView({
         }
       }
       const start = firstWorker >= 0 ? firstWorker : 0;
-      const span = Math.ceil(load / 2);
-      m[line] = { start, end: Math.min(HOUR_COUNT - 1, start + span - 1) };
+      // 실제 배치된 인원의 처리 속도 기준으로 종료시각 결정
+      //  · 1명: rate 0.6 → 부하 6인시 → 약 10시간 필요
+      //  · 2명: rate 2 → 부하 6인시 → 3시간
+      // tracking.completionHour 가 누적 처리량 ≥ load 도달 시각 (실제 인원·임시셀 반영)
+      const completion = tracking[line]?.completionHour;
+      const end =
+        completion !== null && completion !== undefined
+          ? Math.max(start, completion)
+          : HOUR_COUNT - 1; // 못 끝내면 종일
+      m[line] = { start, end };
     }
     return m;
-  }, [loadByLine, lineNames, cellWorkers]);
+  }, [loadByLine, lineNames, cellWorkers, tracking]);
 
   // 라인별 잔업 시간(셀 수) — 잔업창에서 작업자가 배치된 셀 수
   // (잔업 2시간 이하 = 잔업 셀 ≤ 2개 → 낭비, 빠지거나 다른 라인으로)
