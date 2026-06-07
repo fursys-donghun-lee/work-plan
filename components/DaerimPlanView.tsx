@@ -155,6 +155,25 @@ export function DaerimPlanView() {
           result={rReal}
           rBasic={rBasic}
           lineWorkers={lineWorkers}
+          storageKey="drag-plan-confirmed-daerim-v1"
+          feederGroups={[
+            {
+              count: 2, // 김성욱·유인섭
+              triggerType: "load",
+              lines: [
+                "PA-01", "PA-02", "PA-03", "PA-04", "PA-05",
+                "MM-01", "MM-02", "MM-03", "MM-04",
+              ],
+            },
+            {
+              count: 2, // 진영기·박동호
+              triggerType: "ot",
+              lines: [
+                "PA-06", "PA-07", "PA-08",
+                "MA-01", "MA-02", "MA-03", "MM-05",
+              ],
+            },
+          ]}
         />
       )}
     </div>

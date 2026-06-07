@@ -66,16 +66,25 @@ export function CompanyMainDashboard({ company }: Props) {
   const workGroups = useDataStore((s) => s.workGroups);
   const lineBase = useDataStore((s) => s.lineBase);
   const overtimeConfirmed = useDataStore((s) => s.overtimeConfirmed);
-  // 수동 배치 (대림 포장2라인 /plan) 확정 기준 잔업 인원 (직접 인원만)
+  // 수동 배치 잔업 인원 — 대림 포장2라인
   const manualPlanOvertimeConfirmed = useDataStore(
     (s) => s.manualPlanOvertimeConfirmed
   );
-  // 피더 잔업 (별도 행 표시용)
   const manualPlanFeederOvertimeBasic = useDataStore(
     (s) => s.manualPlanFeederOvertimeBasic
   );
   const manualPlanFeederOvertimeConfirmed = useDataStore(
     (s) => s.manualPlanFeederOvertimeConfirmed
+  );
+  // 수동 배치 잔업 인원 — 다호 포장1라인
+  const dohoPlanOvertimeConfirmed = useDataStore(
+    (s) => s.dohoPlanOvertimeConfirmed
+  );
+  const dohoPlanFeederOvertimeBasic = useDataStore(
+    (s) => s.dohoPlanFeederOvertimeBasic
+  );
+  const dohoPlanFeederOvertimeConfirmed = useDataStore(
+    (s) => s.dohoPlanFeederOvertimeConfirmed
   );
 
   const woosungAll = useMemo(
@@ -393,6 +402,7 @@ export function CompanyMainDashboard({ company }: Props) {
         };
       }
       if (category === "포장1라인") {
+        // 포장1라인 잔업필요 = 수동 배치(/plan 다호) 의 확정 배치 잔업 인원
         const directGroups = package1.groups.filter((g) => g.group !== "피더");
         const directPresent = directGroups.reduce(
           (s, g) => s + g.presentMembers.length,
@@ -401,15 +411,10 @@ export function CompanyMainDashboard({ company }: Props) {
         const totalLoad = directGroups.reduce((s, g) => s + g.loadHours, 0);
         const avail = directPresent * 8;
         const diff = Math.round((avail - totalLoad) * 10) / 10;
-        const shortage = diff < 0 ? Math.abs(diff) : 0;
-        const overtime =
-          shortage > 0
-            ? Math.min(Math.ceil(shortage / 3), directPresent)
-            : 0;
         const supportable =
           diff > 0 ? Math.min(Math.floor(diff / 8), directPresent) : 0;
         return {
-          overtime,
+          overtime: dohoPlanOvertimeConfirmed,
           supportable,
           sent: directGroups.reduce((s, g) => s + sentByGroup(g.group), 0),
           received: receiveOrZero("포장1라인"),
@@ -508,53 +513,104 @@ export function CompanyMainDashboard({ company }: Props) {
   const enriched = summaries.map((s) => {
     const stats = getCategoryStats(s.category);
     const finalAvailable = s.attendanceCount + stats.received - stats.sent;
-    // 대림 포장2라인: 잔업확정 = 수동 배치(/plan) 의 확정된 배치 잔업 인원
-    // 그 외: 사원코드 기반 카운트
-    const overtimeConfirmedCount =
-      company === "대림산업" && s.category === "포장2라인"
-        ? manualPlanOvertimeConfirmed
-        : (overtimeConfirmedByCat.get(s.category) ?? 0);
+    // 잔업확정 = 수동 배치(/plan) 의 확정된 배치 잔업 인원
+    // 그 외 카테고리: 사원코드 기반 카운트
+    let overtimeConfirmedCount: number;
+    if (company === "대림산업" && s.category === "포장2라인") {
+      overtimeConfirmedCount = manualPlanOvertimeConfirmed;
+    } else if (company === "다호산업" && s.category === "포장1라인") {
+      overtimeConfirmedCount = dohoPlanOvertimeConfirmed;
+    } else {
+      overtimeConfirmedCount = overtimeConfirmedByCat.get(s.category) ?? 0;
+    }
     return { ...s, ...stats, finalAvailable, overtimeConfirmedCount };
   });
 
-  // 대림산업 — 피더 행 별도 분리 + 포장2라인 인원에서 피더 차감
+  // 피더 행 분리 + 모회사 라인 인원에서 피더 차감
+  // - 대림산업: 포장2라인 → 피더 (package2)
+  // - 다호산업: 포장1라인 → 피더 (package1)
   let displayRows = enriched;
-  if (company === "대림산업") {
-    const feederGroup = package2.groups.find((g) => g.group === "피더");
+  const buildFeederRow = (
+    feederGroup:
+      | {
+          members: { name: string }[];
+          presentMembers: { name: string }[];
+          absentMembers: { name: string }[];
+        }
+      | undefined,
+    overtimeBasic: number,
+    overtimeConfirmed: number
+  ) => {
     const feederBase = feederGroup?.members.length ?? 0;
     const feederPresent = feederGroup?.presentMembers.length ?? 0;
     const feederAbsent = feederBase - feederPresent;
     const feederAbsentNames =
       feederGroup?.absentMembers.map((m) => m.name) ?? [];
-    const feederRow = {
-      category: "피더",
-      baseCount: feederBase,
-      attendanceCount: feederPresent,
-      absentCount: feederAbsent,
+    return {
+      base: feederBase,
+      present: feederPresent,
+      absent: feederAbsent,
       absentNames: feederAbsentNames,
-      overtime: manualPlanFeederOvertimeBasic,
-      supportable: 0,
-      sent: 0,
-      received: 0,
-      finalAvailable: feederPresent,
-      overtimeConfirmedCount: manualPlanFeederOvertimeConfirmed,
-    } as (typeof enriched)[number];
+      row: {
+        category: "피더",
+        baseCount: feederBase,
+        attendanceCount: feederPresent,
+        absentCount: feederAbsent,
+        absentNames: feederAbsentNames,
+        overtime: overtimeBasic,
+        supportable: 0,
+        sent: 0,
+        received: 0,
+        finalAvailable: feederPresent,
+        overtimeConfirmedCount: overtimeConfirmed,
+      } as (typeof enriched)[number],
+    };
+  };
 
+  if (company === "대림산업") {
+    const f = buildFeederRow(
+      package2.groups.find((g) => g.group === "피더"),
+      manualPlanFeederOvertimeBasic,
+      manualPlanFeederOvertimeConfirmed
+    );
     displayRows = [];
     for (const row of enriched) {
       if (row.category === "포장2라인") {
-        // 포장2라인 인원에서 피더 차감 (피더는 별도 행으로)
         displayRows.push({
           ...row,
-          baseCount: Math.max(0, row.baseCount - feederBase),
-          attendanceCount: Math.max(0, row.attendanceCount - feederPresent),
-          absentCount: Math.max(0, row.absentCount - feederAbsent),
+          baseCount: Math.max(0, row.baseCount - f.base),
+          attendanceCount: Math.max(0, row.attendanceCount - f.present),
+          absentCount: Math.max(0, row.absentCount - f.absent),
           absentNames: row.absentNames.filter(
-            (n) => !feederAbsentNames.includes(n)
+            (n) => !f.absentNames.includes(n)
           ),
-          finalAvailable: Math.max(0, row.finalAvailable - feederPresent),
+          finalAvailable: Math.max(0, row.finalAvailable - f.present),
         });
-        displayRows.push(feederRow);
+        displayRows.push(f.row);
+      } else {
+        displayRows.push(row);
+      }
+    }
+  } else if (company === "다호산업") {
+    const f = buildFeederRow(
+      package1.groups.find((g) => g.group === "피더"),
+      dohoPlanFeederOvertimeBasic,
+      dohoPlanFeederOvertimeConfirmed
+    );
+    displayRows = [];
+    for (const row of enriched) {
+      if (row.category === "포장1라인") {
+        displayRows.push({
+          ...row,
+          baseCount: Math.max(0, row.baseCount - f.base),
+          attendanceCount: Math.max(0, row.attendanceCount - f.present),
+          absentCount: Math.max(0, row.absentCount - f.absent),
+          absentNames: row.absentNames.filter(
+            (n) => !f.absentNames.includes(n)
+          ),
+          finalAvailable: Math.max(0, row.finalAvailable - f.present),
+        });
+        displayRows.push(f.row);
       } else {
         displayRows.push(row);
       }

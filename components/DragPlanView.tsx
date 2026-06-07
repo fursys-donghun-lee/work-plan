@@ -21,10 +21,25 @@ import { RealMetricsPanel } from "@/components/RealMetricsPanel";
 import { ImprovementSummary } from "@/components/ImprovementSummary";
 import { useDataStore } from "@/lib/store/useDataStore";
 
+// 피더 잔업 트리거 그룹
+export interface FeederGroupConfig {
+  count: number; // 피더 인원 수
+  lines: string[]; // 트리거 대상 라인 이름들
+  triggerType: "load" | "ot"; // load > 0 일 때 OR OT (otCells≥2) 일 때
+}
+
 interface Props {
   result: ReallocResult; // 라인 부하 정보용 (재배치 시뮬 결과 — 라인/부하 메타)
   rBasic: ReallocResult; // 기본 배치 결과 (개선 효과 비교용)
   lineWorkers: Record<string, string[]>; // 출근 시 라인별 작업자
+  feederGroups?: FeederGroupConfig[]; // 피더 잔업 트리거 (회사별)
+  storageKey?: string; // localStorage 키 — 회사별 분리
+  setOvertimeFn?: (
+    basic: number,
+    confirmed: number,
+    feederBasic: number,
+    feederConfirmed: number
+  ) => void; // 메인 대시보드 전파용 (회사별 store 필드)
 }
 
 // 11 시간 슬롯 (work-time 0..10)
@@ -39,7 +54,14 @@ function ratePerHour(headcount: number, autoManaged = false): number {
 }
 
 // 수동 배치 (드래그앤드롭) — 라인별 시간 슬롯에 작업자 직접 배치
-export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
+export function DragPlanView({
+  result,
+  rBasic,
+  lineWorkers,
+  feederGroups,
+  storageKey,
+  setOvertimeFn,
+}: Props) {
   // assignments[workerName] = [line at hour 0, ..., hour HOUR_COUNT-1]
   const initialAssignments = useMemo(() => {
     const m: Record<string, string[]> = {};
@@ -57,7 +79,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   // 확정/잠금 상태 — 확정 시 현재 assignments 를 스냅샷, 다시 누르면 해제
   // 확정된 계획은 localStorage 에 저장되어 새로고침/탭전환 후에도 유지
   // (그날 24:00 전까지 또는 확정해제 후 수정시까지)
-  const STORAGE_KEY = "drag-plan-confirmed-v1";
+  const STORAGE_KEY = storageKey ?? "drag-plan-confirmed-v1";
   const [confirmed, setConfirmed] = useState<Record<string, string[]> | null>(
     null
   );
@@ -514,21 +536,17 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     }
 
     // 피더 잔업 — 메인 OT 카운트(overtimePeople) 에는 포함하지 않고 별도로 반환
-    // Group A: PA-01~05, MM-01~04 중 load > 0 → 김성욱·유인섭 (+2)
-    // Group B: PA-06~08, MA-01~03, MM-05 중 잔업(otCells≥2) → 진영기·박동호 (+2)
-    const GROUP_A = [
-      "PA-01", "PA-02", "PA-03", "PA-04", "PA-05",
-      "MM-01", "MM-02", "MM-03", "MM-04",
-    ];
-    const GROUP_B = [
-      "PA-06", "PA-07", "PA-08",
-      "MA-01", "MA-02", "MA-03", "MM-05",
-    ];
-    const groupAHasLoad = GROUP_A.some((l) => (loadByLine[l] ?? 0) > 0.01);
-    const groupBHasOT = GROUP_B.some((l) => lineHasOTSet.has(l));
+    // feederGroups 가 제공되면 그 설정을 따름 (회사별 설정)
     let feederOvertime = 0;
-    if (groupAHasLoad) feederOvertime += 2;
-    if (groupBHasOT) feederOvertime += 2;
+    if (feederGroups && feederGroups.length > 0) {
+      for (const fg of feederGroups) {
+        const triggered =
+          fg.triggerType === "load"
+            ? fg.lines.some((l) => (loadByLine[l] ?? 0) > 0.01)
+            : fg.lines.some((l) => lineHasOTSet.has(l));
+        if (triggered) feederOvertime += fg.count;
+      }
+    }
 
     const availableLoad = totalPeople * STANDARD;
     const regularIdle = Math.max(0, availableLoad - regularWork);
@@ -592,8 +610,9 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     ]
   );
 
-  // 메인 대시보드에 잔업필요/잔업확정 노출 — store 에 push
+  // 메인 대시보드에 잔업필요/잔업확정 노출 — store 에 push (회사별 setter)
   const setManualPlanOvertime = useDataStore((s) => s.setManualPlanOvertime);
+  const pushOvertime = setOvertimeFn ?? setManualPlanOvertime;
 
   // 기본 배치(initialAssignments) 기준 result — 개선 효과 비교의 베이스라인
   const basicSynth = useMemo(
@@ -621,7 +640,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   // - basic/confirmed: 직접 인원 (피더 제외)
   // - feederBasic/feederConfirmed: 피더 잔업
   useEffect(() => {
-    setManualPlanOvertime(
+    pushOvertime(
       basicResult.overtimePeople,
       confirmedResult?.overtimePeople ?? 0,
       basicSynth.feederOvertime,
@@ -632,7 +651,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     confirmedResult?.overtimePeople,
     basicSynth.feederOvertime,
     confirmedSynth?.feederOvertime,
-    setManualPlanOvertime,
+    pushOvertime,
   ]);
 
   // 시각 atHour 에서 추천 도착 라인 — 우선순위:

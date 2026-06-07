@@ -19,10 +19,16 @@ import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
 const STATE_DOC_PATH = ["state", "main"] as const;
 const PLAN_DOC_PATH = ["state", "plan"] as const;
 const PLAN_KEYS = [
+  // 대림 포장2라인
   "manualPlanOvertimeBasic",
   "manualPlanOvertimeConfirmed",
   "manualPlanFeederOvertimeBasic",
   "manualPlanFeederOvertimeConfirmed",
+  // 다호 포장1라인
+  "dohoPlanOvertimeBasic",
+  "dohoPlanOvertimeConfirmed",
+  "dohoPlanFeederOvertimeBasic",
+  "dohoPlanFeederOvertimeConfirmed",
 ] as const;
 
 const SYNCED_KEYS = [

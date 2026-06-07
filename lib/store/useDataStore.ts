@@ -80,13 +80,16 @@ interface DataState {
   // 오늘 잔업 확정된 사원코드 (라인/회사 구분 없이 통합 — 화면에서 필터링)
   overtimeConfirmed: string[];
 
-  // 수동 배치 (대림 포장2라인 /plan 페이지) 산출 잔업 인원 — 메인 대시보드에 표시
-  // basic/confirmed: 직접 인원만 (피더 제외)
-  // feeder: 피더(김성욱·유인섭·진영기·박동호) 잔업 — 라인 그룹별 트리거
+  // 수동 배치 (대림 포장2라인 /plan 페이지) 산출 잔업 인원
   manualPlanOvertimeBasic: number;
   manualPlanOvertimeConfirmed: number;
   manualPlanFeederOvertimeBasic: number;
   manualPlanFeederOvertimeConfirmed: number;
+  // 수동 배치 (다호 포장1라인 /plan 페이지) 산출 잔업 인원
+  dohoPlanOvertimeBasic: number;
+  dohoPlanOvertimeConfirmed: number;
+  dohoPlanFeederOvertimeBasic: number;
+  dohoPlanFeederOvertimeConfirmed: number;
 
   // 업로드 로그 (최근 50개 유지)
   uploadLog: UploadLogEntry[];
@@ -145,6 +148,12 @@ interface DataState {
   toggleOvertimeConfirmed: (empCode: string) => void;
   clearOvertimeConfirmed: () => void;
   setManualPlanOvertime: (
+    basic: number,
+    confirmed: number,
+    feederBasic: number,
+    feederConfirmed: number
+  ) => void;
+  setDohoPlanOvertime: (
     basic: number,
     confirmed: number,
     feederBasic: number,
@@ -209,6 +218,10 @@ export const useDataStore = create<DataState>()(
       manualPlanOvertimeConfirmed: 0,
       manualPlanFeederOvertimeBasic: 0,
       manualPlanFeederOvertimeConfirmed: 0,
+      dohoPlanOvertimeBasic: 0,
+      dohoPlanOvertimeConfirmed: 0,
+      dohoPlanFeederOvertimeBasic: 0,
+      dohoPlanFeederOvertimeConfirmed: 0,
       uploadLog: [],
 
       setSelectedCompany: (company) => set({ selectedCompany: company }),
@@ -445,6 +458,13 @@ export const useDataStore = create<DataState>()(
           manualPlanOvertimeConfirmed: confirmed,
           manualPlanFeederOvertimeBasic: feederBasic,
           manualPlanFeederOvertimeConfirmed: feederConfirmed,
+        }),
+      setDohoPlanOvertime: (basic, confirmed, feederBasic, feederConfirmed) =>
+        set({
+          dohoPlanOvertimeBasic: basic,
+          dohoPlanOvertimeConfirmed: confirmed,
+          dohoPlanFeederOvertimeBasic: feederBasic,
+          dohoPlanFeederOvertimeConfirmed: feederConfirmed,
         }),
       addUploadLog: (entry) =>
         set((state) => ({
