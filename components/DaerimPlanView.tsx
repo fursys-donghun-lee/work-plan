@@ -32,7 +32,7 @@ export function DaerimPlanView() {
   // 임시 셀(보조 작업셀) 상태
   const [tempCells, setTempCells] = useState<TempCell[]>([]);
   // 탭 (재배치 계획 / 수동 배치)
-  const [tab, setTab] = useState<"main" | "drag">("main");
+  const [tab, setTab] = useState<"main" | "drag">("drag");
 
   // 기본 배치 vs 재배치 결과 → 개선 효과(델타) 계산
   const rBasic = useMemo(
