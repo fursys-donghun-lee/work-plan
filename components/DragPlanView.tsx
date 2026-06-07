@@ -495,6 +495,23 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     ]
   );
 
+  // 기본 배치(initialAssignments) 기준 result — 개선 효과 비교의 베이스라인
+  // (rBasic 은 시뮬레이션 기반이라 수동 배치의 '기본 배치 보기' 와 기준이 다름)
+  const basicResult = useMemo<ReallocResult>(
+    () => synthesizeResult(initialAssignments),
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [
+      initialAssignments,
+      lineNames,
+      lineMeta,
+      loadByLine,
+      lineWorkers,
+      inTempCellLookup,
+      tcContribByLine,
+      tempCellDoneByLine,
+    ]
+  );
+
 
   // 시각 atHour 에서 추천 도착 라인 — 우선순위:
   //  1) 긴급(D-1/D-2) 라인 중 2명 미만 (짝 완성 필요)
@@ -820,9 +837,10 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
 
   return (
     <>
-      {/* 개선 효과 패널 — '기본 배치' vs '확정된 배치' 비교 */}
+      {/* 개선 효과 패널 — '기본 배치(이동 없음 출근 그대로)' vs '확정된 배치' 비교
+          basicResult = synthesizeResult(initialAssignments) — '기본 배치 보기' 와 동일 기준 */}
       {confirmedResult ? (
-        <ImprovementSummary rBasic={rBasic} rReal={confirmedResult} />
+        <ImprovementSummary rBasic={basicResult} rReal={confirmedResult} />
       ) : (
         <div className="card border-amber-200 bg-amber-50/40">
           <h2 className="font-semibold text-slate-900 flex items-center gap-2 mb-1">
