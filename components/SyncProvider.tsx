@@ -48,6 +48,8 @@ const SYNCED_KEYS = [
   "package2SupportPlacements",
   "package2GroupMerges",
   "overtimeConfirmed",
+  "manualPlanOvertimeBasic",
+  "manualPlanOvertimeConfirmed",
   "uploadLog",
 ] as const;
 

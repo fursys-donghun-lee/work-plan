@@ -66,6 +66,13 @@ export function CompanyMainDashboard({ company }: Props) {
   const workGroups = useDataStore((s) => s.workGroups);
   const lineBase = useDataStore((s) => s.lineBase);
   const overtimeConfirmed = useDataStore((s) => s.overtimeConfirmed);
+  // 수동 배치 (대림 포장2라인 /plan) 기준 잔업 인원
+  const manualPlanOvertimeBasic = useDataStore(
+    (s) => s.manualPlanOvertimeBasic
+  );
+  const manualPlanOvertimeConfirmed = useDataStore(
+    (s) => s.manualPlanOvertimeConfirmed
+  );
 
   const woosungAll = useMemo(
     () =>
@@ -437,7 +444,8 @@ export function CompanyMainDashboard({ company }: Props) {
         };
       }
       if (category === "포장2라인") {
-        // 포장2라인 직접그룹 통합 잔업필요 (피더는 간접이라 제외)
+        // 포장2라인 잔업필요 = 수동 배치(/plan) 의 기본 배치 기준 잔업 인원
+        // (basicResult.overtimePeople = synthesizeResult(initialAssignments))
         const directGroups = package2.groups.filter((g) => g.group !== "피더");
         const directPresent = directGroups.reduce(
           (s, g) => s + g.presentMembers.length,
@@ -446,15 +454,10 @@ export function CompanyMainDashboard({ company }: Props) {
         const totalLoad = directGroups.reduce((s, g) => s + g.loadHours, 0);
         const avail = directPresent * 8;
         const diff = Math.round((avail - totalLoad) * 10) / 10;
-        const shortage = diff < 0 ? Math.abs(diff) : 0;
-        const overtime =
-          shortage > 0
-            ? Math.min(Math.ceil(shortage / 3), directPresent)
-            : 0;
         const supportable =
           diff > 0 ? Math.min(Math.floor(diff / 8), directPresent) : 0;
         return {
-          overtime,
+          overtime: manualPlanOvertimeBasic,
           supportable,
           sent: directGroups.reduce((s, g) => s + sentByGroup(g.group), 0),
           received: receiveOrZero("포장2라인"),
@@ -501,7 +504,12 @@ export function CompanyMainDashboard({ company }: Props) {
   const enriched = summaries.map((s) => {
     const stats = getCategoryStats(s.category);
     const finalAvailable = s.attendanceCount + stats.received - stats.sent;
-    const overtimeConfirmedCount = overtimeConfirmedByCat.get(s.category) ?? 0;
+    // 대림 포장2라인: 잔업확정 = 수동 배치(/plan) 의 확정된 배치 잔업 인원
+    // 그 외: 사원코드 기반 카운트
+    const overtimeConfirmedCount =
+      company === "대림산업" && s.category === "포장2라인"
+        ? manualPlanOvertimeConfirmed
+        : (overtimeConfirmedByCat.get(s.category) ?? 0);
     return { ...s, ...stats, finalAvailable, overtimeConfirmedCount };
   });
 

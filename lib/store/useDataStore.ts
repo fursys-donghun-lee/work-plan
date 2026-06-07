@@ -80,6 +80,12 @@ interface DataState {
   // 오늘 잔업 확정된 사원코드 (라인/회사 구분 없이 통합 — 화면에서 필터링)
   overtimeConfirmed: string[];
 
+  // 수동 배치 (대림 포장2라인 /plan 페이지) 산출 잔업 인원 — 메인 대시보드에 표시
+  // basic: synthesizeResult(initialAssignments) → 기본 배치 기준 잔업 인원
+  // confirmed: synthesizeResult(confirmed snapshot) → 확정된 배치 잔업 인원
+  manualPlanOvertimeBasic: number;
+  manualPlanOvertimeConfirmed: number;
+
   // 업로드 로그 (최근 50개 유지)
   uploadLog: UploadLogEntry[];
 
@@ -136,6 +142,7 @@ interface DataState {
   resetPackage2GroupMerges: () => void;
   toggleOvertimeConfirmed: (empCode: string) => void;
   clearOvertimeConfirmed: () => void;
+  setManualPlanOvertime: (basic: number, confirmed: number) => void;
   addUploadLog: (entry: UploadLogEntry) => void;
   clearUploadLog: () => void;
   clearAllData: () => void;
@@ -191,6 +198,8 @@ export const useDataStore = create<DataState>()(
       package2SupportPlacements: [],
       package2GroupMerges: [],
       overtimeConfirmed: [],
+      manualPlanOvertimeBasic: 0,
+      manualPlanOvertimeConfirmed: 0,
       uploadLog: [],
 
       setSelectedCompany: (company) => set({ selectedCompany: company }),
@@ -421,6 +430,11 @@ export const useDataStore = create<DataState>()(
           return { overtimeConfirmed: Array.from(next) };
         }),
       clearOvertimeConfirmed: () => set({ overtimeConfirmed: [] }),
+      setManualPlanOvertime: (basic, confirmed) =>
+        set({
+          manualPlanOvertimeBasic: basic,
+          manualPlanOvertimeConfirmed: confirmed,
+        }),
       addUploadLog: (entry) =>
         set((state) => ({
           uploadLog: [entry, ...state.uploadLog].slice(0, 50),

@@ -19,6 +19,7 @@ type ManualTempCell = {
 };
 import { RealMetricsPanel } from "@/components/RealMetricsPanel";
 import { ImprovementSummary } from "@/components/ImprovementSummary";
+import { useDataStore } from "@/lib/store/useDataStore";
 
 interface Props {
   result: ReallocResult; // 라인 부하 정보용 (재배치 시뮬 결과 — 라인/부하 메타)
@@ -495,6 +496,9 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     ]
   );
 
+  // 메인 대시보드에 잔업필요/잔업확정 노출 — store 에 push
+  const setManualPlanOvertime = useDataStore((s) => s.setManualPlanOvertime);
+
   // 기본 배치(initialAssignments) 기준 result — 개선 효과 비교의 베이스라인
   // (rBasic 은 시뮬레이션 기반이라 수동 배치의 '기본 배치 보기' 와 기준이 다름)
   const basicResult = useMemo<ReallocResult>(
@@ -512,6 +516,17 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     ]
   );
 
+  // 메인 대시보드에 잔업 인원 전파 (기본 배치 / 확정된 배치 기준)
+  useEffect(() => {
+    setManualPlanOvertime(
+      basicResult.overtimePeople,
+      confirmedResult?.overtimePeople ?? 0
+    );
+  }, [
+    basicResult.overtimePeople,
+    confirmedResult?.overtimePeople,
+    setManualPlanOvertime,
+  ]);
 
   // 시각 atHour 에서 추천 도착 라인 — 우선순위:
   //  1) 긴급(D-1/D-2) 라인 중 2명 미만 (짝 완성 필요)
