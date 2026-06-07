@@ -52,7 +52,8 @@ const SYNCED_KEYS = [
   "manualPlanOvertimeConfirmed",
   "manualPlanFeederOvertimeBasic",
   "manualPlanFeederOvertimeConfirmed",
-  "uploadLog",
+  // uploadLog 는 sync 제외 — 문서 크기 1MB 초과 방지
+  // (각 PC 에 localStorage 에만 유지)
 ] as const;
 
 function pickSynced(state: Record<string, unknown>): Record<string, unknown> {
@@ -182,6 +183,27 @@ function mergePreserveLocal(
   for (const k of SYNCED_KEYS) {
     if (isEmptyValue(merged[k]) && !isEmptyValue((local as any)[k])) {
       merged[k] = (local as any)[k];
+      preservedFromLocal = true;
+    }
+  }
+
+  // 5. manualPlan* 수치 필드 — 로컬이 양수면 원격 0/undefined 가 덮어쓰지 않게
+  //    (쓰기 실패 후 stale snapshot 이 로컬 계산값을 0으로 리셋하는 문제 방지)
+  const MANUAL_PLAN_NUM_KEYS = [
+    "manualPlanOvertimeBasic",
+    "manualPlanOvertimeConfirmed",
+    "manualPlanFeederOvertimeBasic",
+    "manualPlanFeederOvertimeConfirmed",
+  ] as const;
+  for (const k of MANUAL_PLAN_NUM_KEYS) {
+    const r = (remote as Record<string, unknown>)[k];
+    const l = (local as Record<string, unknown>)[k];
+    if (
+      typeof l === "number" &&
+      l > 0 &&
+      (typeof r !== "number" || r === 0)
+    ) {
+      merged[k] = l;
       preservedFromLocal = true;
     }
   }
@@ -421,19 +443,34 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {
         const code = (e as { code?: string })?.code ?? String(e);
         console.error("[SyncProvider] write 실패", e);
+        // 문서 크기 정보 (디버깅용)
+        const sizeKB = (mergedBody.length / 1024).toFixed(0);
+        const isPersistent =
+          code === "permission-denied" ||
+          code.includes("resource-exhausted") ||
+          code === "auth/operation-not-allowed";
         setStatus({
           kind: "write-failed",
           reason:
             code === "permission-denied"
               ? "Firestore 권한 오류 — 보안 규칙 확인 필요"
               : code.includes("resource-exhausted")
-                ? "Firestore 용량 초과 — 문서가 너무 큼 (1MB 제한)"
-                : code,
+                ? `문서 크기 ${sizeKB}KB — 1MB 초과 위험 (오래된 업로드 로그 정리 필요)`
+                : `${code} (size ${sizeKB}KB)`,
         });
-        // 5초 후 자동 재시도 (전송 실패 후에도 다음 변경 기다리지 않고 복구)
+        // 영구 에러(권한/용량/인증)면 재시도 안 함 — 무한 루프 방지
+        // 일시적 에러만 5초 후 한 번 재시도, 그 후 10초 뒤 상태 자동 정리
+        if (!isPersistent) {
+          setTimeout(() => {
+            if (!inflight) flush();
+          }, 5000);
+        }
+        // 15초 후 상태 자동 클리어 — 빨간 박스 영구 노출 방지
         setTimeout(() => {
-          if (!inflight) flush();
-        }, 5000);
+          setStatus((s) =>
+            s.kind === "write-failed" ? { kind: "ok" } : s
+          );
+        }, 15000);
         localPendingRef.current = false;
       } finally {
         inflight = false;
