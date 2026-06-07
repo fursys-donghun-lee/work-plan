@@ -66,9 +66,16 @@ export function CompanyMainDashboard({ company }: Props) {
   const workGroups = useDataStore((s) => s.workGroups);
   const lineBase = useDataStore((s) => s.lineBase);
   const overtimeConfirmed = useDataStore((s) => s.overtimeConfirmed);
-  // 수동 배치 (대림 포장2라인 /plan) 확정 기준 잔업 인원
+  // 수동 배치 (대림 포장2라인 /plan) 확정 기준 잔업 인원 (직접 인원만)
   const manualPlanOvertimeConfirmed = useDataStore(
     (s) => s.manualPlanOvertimeConfirmed
+  );
+  // 피더 잔업 (별도 행 표시용)
+  const manualPlanFeederOvertimeBasic = useDataStore(
+    (s) => s.manualPlanFeederOvertimeBasic
+  );
+  const manualPlanFeederOvertimeConfirmed = useDataStore(
+    (s) => s.manualPlanFeederOvertimeConfirmed
   );
 
   const woosungAll = useMemo(
@@ -510,19 +517,69 @@ export function CompanyMainDashboard({ company }: Props) {
     return { ...s, ...stats, finalAvailable, overtimeConfirmedCount };
   });
 
+  // 대림산업 — 피더 행 별도 분리 + 포장2라인 인원에서 피더 차감
+  let displayRows = enriched;
+  if (company === "대림산업") {
+    const feederGroup = package2.groups.find((g) => g.group === "피더");
+    const feederBase = feederGroup?.members.length ?? 0;
+    const feederPresent = feederGroup?.presentMembers.length ?? 0;
+    const feederAbsent = feederBase - feederPresent;
+    const feederAbsentNames =
+      feederGroup?.absentMembers.map((m) => m.name) ?? [];
+    const feederRow = {
+      category: "피더",
+      baseCount: feederBase,
+      attendanceCount: feederPresent,
+      absentCount: feederAbsent,
+      absentNames: feederAbsentNames,
+      overtime: manualPlanFeederOvertimeBasic,
+      supportable: 0,
+      sent: 0,
+      received: 0,
+      finalAvailable: feederPresent,
+      overtimeConfirmedCount: manualPlanFeederOvertimeConfirmed,
+    } as (typeof enriched)[number];
+
+    displayRows = [];
+    for (const row of enriched) {
+      if (row.category === "포장2라인") {
+        // 포장2라인 인원에서 피더 차감 (피더는 별도 행으로)
+        displayRows.push({
+          ...row,
+          baseCount: Math.max(0, row.baseCount - feederBase),
+          attendanceCount: Math.max(0, row.attendanceCount - feederPresent),
+          absentCount: Math.max(0, row.absentCount - feederAbsent),
+          absentNames: row.absentNames.filter(
+            (n) => !feederAbsentNames.includes(n)
+          ),
+          finalAvailable: Math.max(0, row.finalAvailable - feederPresent),
+        });
+        displayRows.push(feederRow);
+      } else {
+        displayRows.push(row);
+      }
+    }
+  }
+
   // 5) 합계
-  const totalBase = enriched.reduce((s, r) => s + r.baseCount, 0);
-  const totalPresent = enriched.reduce((s, r) => s + r.attendanceCount, 0);
-  const totalAbsent = enriched.reduce((s, r) => s + r.absentCount, 0);
-  const totalOvertime = enriched.reduce((s, r) => s + r.overtime, 0);
-  const totalOvertimeConfirmed = enriched.reduce(
+  const totalBase = displayRows.reduce((s, r) => s + r.baseCount, 0);
+  const totalPresent = displayRows.reduce(
+    (s, r) => s + r.attendanceCount,
+    0
+  );
+  const totalAbsent = displayRows.reduce((s, r) => s + r.absentCount, 0);
+  const totalOvertime = displayRows.reduce((s, r) => s + r.overtime, 0);
+  const totalOvertimeConfirmed = displayRows.reduce(
     (s, r) => s + r.overtimeConfirmedCount,
     0
   );
-  const totalReceived = enriched.reduce((s, r) => s + r.received, 0);
-  const totalSent = enriched.reduce((s, r) => s + r.sent, 0);
+  const totalReceived = displayRows.reduce((s, r) => s + r.received, 0);
+  const totalSent = displayRows.reduce((s, r) => s + r.sent, 0);
   const totalSupportNet = totalReceived - totalSent;
-  const totalFinalAvailable = enriched.reduce((s, r) => s + r.finalAvailable, 0);
+  const totalFinalAvailable = displayRows.reduce(
+    (s, r) => s + r.finalAvailable,
+    0
+  );
 
   return (
     <div className="space-y-6">
@@ -595,7 +652,7 @@ export function CompanyMainDashboard({ company }: Props) {
               </tr>
             </thead>
             <tbody>
-              {enriched.map((row) => {
+              {displayRows.map((row) => {
                 const supportNet = row.received - row.sent;
                 return (
                   <tr key={row.category}>

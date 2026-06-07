@@ -81,10 +81,12 @@ interface DataState {
   overtimeConfirmed: string[];
 
   // 수동 배치 (대림 포장2라인 /plan 페이지) 산출 잔업 인원 — 메인 대시보드에 표시
-  // basic: synthesizeResult(initialAssignments) → 기본 배치 기준 잔업 인원
-  // confirmed: synthesizeResult(confirmed snapshot) → 확정된 배치 잔업 인원
+  // basic/confirmed: 직접 인원만 (피더 제외)
+  // feeder: 피더(김성욱·유인섭·진영기·박동호) 잔업 — 라인 그룹별 트리거
   manualPlanOvertimeBasic: number;
   manualPlanOvertimeConfirmed: number;
+  manualPlanFeederOvertimeBasic: number;
+  manualPlanFeederOvertimeConfirmed: number;
 
   // 업로드 로그 (최근 50개 유지)
   uploadLog: UploadLogEntry[];
@@ -142,7 +144,12 @@ interface DataState {
   resetPackage2GroupMerges: () => void;
   toggleOvertimeConfirmed: (empCode: string) => void;
   clearOvertimeConfirmed: () => void;
-  setManualPlanOvertime: (basic: number, confirmed: number) => void;
+  setManualPlanOvertime: (
+    basic: number,
+    confirmed: number,
+    feederBasic: number,
+    feederConfirmed: number
+  ) => void;
   addUploadLog: (entry: UploadLogEntry) => void;
   clearUploadLog: () => void;
   clearAllData: () => void;
@@ -200,6 +207,8 @@ export const useDataStore = create<DataState>()(
       overtimeConfirmed: [],
       manualPlanOvertimeBasic: 0,
       manualPlanOvertimeConfirmed: 0,
+      manualPlanFeederOvertimeBasic: 0,
+      manualPlanFeederOvertimeConfirmed: 0,
       uploadLog: [],
 
       setSelectedCompany: (company) => set({ selectedCompany: company }),
@@ -430,10 +439,12 @@ export const useDataStore = create<DataState>()(
           return { overtimeConfirmed: Array.from(next) };
         }),
       clearOvertimeConfirmed: () => set({ overtimeConfirmed: [] }),
-      setManualPlanOvertime: (basic, confirmed) =>
+      setManualPlanOvertime: (basic, confirmed, feederBasic, feederConfirmed) =>
         set({
           manualPlanOvertimeBasic: basic,
           manualPlanOvertimeConfirmed: confirmed,
+          manualPlanFeederOvertimeBasic: feederBasic,
+          manualPlanFeederOvertimeConfirmed: feederConfirmed,
         }),
       addUploadLog: (entry) =>
         set((state) => ({

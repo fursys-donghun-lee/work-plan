@@ -50,6 +50,8 @@ const SYNCED_KEYS = [
   "overtimeConfirmed",
   "manualPlanOvertimeBasic",
   "manualPlanOvertimeConfirmed",
+  "manualPlanFeederOvertimeBasic",
+  "manualPlanFeederOvertimeConfirmed",
   "uploadLog",
 ] as const;
 

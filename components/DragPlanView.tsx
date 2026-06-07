@@ -348,11 +348,12 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   // 라인 메타 조회용 (lineMetaEarly 위에서 정의됨, 별칭만)
   const lineMeta = lineMetaEarly;
 
-  // 합성 ReallocResult 헬퍼 — assignments 소스를 받아 ReallocResult 생성
-  // (수동 배치 / 확정 스냅샷 둘 다에서 재사용)
+  // 합성 ReallocResult 헬퍼 — assignments 소스를 받아 result + 피더 잔업 인원 반환
+  // ReallocResult.overtimePeople 은 '직접 인원만' (피더 제외)
+  // feederOvertime 은 별도 — 메인 대시보드 피더 행에서 사용
   const synthesizeResult = (
     src: Record<string, string[]>
-  ): ReallocResult => {
+  ): { result: ReallocResult; feederOvertime: number } => {
     const STANDARD = 8;
     const allWorkersSet = new Set<string>();
     for (const ws of Object.values(lineWorkers))
@@ -467,9 +468,9 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       }
     }
 
-    // 피더 잔업 (대림 포장2라인)
-    // Group A: PA-01~05, MM-01~04 — '라인에 작업이 있으면' (load > 0) → 김성욱·유인섭
-    // Group B: PA-06~08, MA-01~03, MM-05 — '라인에 잔업이 있으면' → 진영기·박동호
+    // 피더 잔업 — 메인 OT 카운트(overtimePeople) 에는 포함하지 않고 별도로 반환
+    // Group A: PA-01~05, MM-01~04 중 load > 0 → 김성욱·유인섭 (+2)
+    // Group B: PA-06~08, MA-01~03, MM-05 중 잔업(otCells≥2) → 진영기·박동호 (+2)
     const GROUP_A = [
       "PA-01", "PA-02", "PA-03", "PA-04", "PA-05",
       "MM-01", "MM-02", "MM-03", "MM-04",
@@ -480,8 +481,9 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     ];
     const groupAHasLoad = GROUP_A.some((l) => (loadByLine[l] ?? 0) > 0.01);
     const groupBHasOT = GROUP_B.some((l) => lineHasOTSet.has(l));
-    if (groupAHasLoad) overtimePeople += 2; // 김성욱, 유인섭
-    if (groupBHasOT) overtimePeople += 2; // 진영기, 박동호
+    let feederOvertime = 0;
+    if (groupAHasLoad) feederOvertime += 2;
+    if (groupBHasOT) feederOvertime += 2;
 
     const availableLoad = totalPeople * STANDARD;
     const regularIdle = Math.max(0, availableLoad - regularWork);
@@ -489,7 +491,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     const otIdle = Math.max(0, overtimePeople * otDuration - otWork);
     const idle = regularIdle + otIdle;
 
-    return {
+    const result: ReallocResult = {
       startTime: 0,
       standardEnd: STANDARD,
       actualEnd: otOperationEnd,
@@ -508,10 +510,11 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       overtimePeople,
       overtimePersonHours: otWork,
     };
+    return { result, feederOvertime };
   };
 
   // 현재 화면 기준 manual result (지표 패널용)
-  const manualResult = useMemo<ReallocResult>(
+  const manualSynth = useMemo(
     () => synthesizeResult(displayAssignments),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -528,7 +531,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   );
 
   // 확정 스냅샷 기준 result (개선 효과 패널 비교용)
-  const confirmedResult = useMemo<ReallocResult | null>(
+  const confirmedSynth = useMemo(
     () => (confirmed ? synthesizeResult(confirmed) : null),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -548,8 +551,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   const setManualPlanOvertime = useDataStore((s) => s.setManualPlanOvertime);
 
   // 기본 배치(initialAssignments) 기준 result — 개선 효과 비교의 베이스라인
-  // (rBasic 은 시뮬레이션 기반이라 수동 배치의 '기본 배치 보기' 와 기준이 다름)
-  const basicResult = useMemo<ReallocResult>(
+  const basicSynth = useMemo(
     () => synthesizeResult(initialAssignments),
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [
@@ -565,15 +567,26 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     ]
   );
 
-  // 메인 대시보드에 잔업 인원 전파 (기본 배치 / 확정된 배치 기준)
+  // 호환을 위한 별칭들 — 기존 코드가 ReallocResult 만 기대
+  const manualResult = manualSynth.result;
+  const confirmedResult = confirmedSynth?.result ?? null;
+  const basicResult = basicSynth.result;
+
+  // 메인 대시보드에 잔업 인원 전파
+  // - basic/confirmed: 직접 인원 (피더 제외)
+  // - feederBasic/feederConfirmed: 피더 잔업
   useEffect(() => {
     setManualPlanOvertime(
       basicResult.overtimePeople,
-      confirmedResult?.overtimePeople ?? 0
+      confirmedResult?.overtimePeople ?? 0,
+      basicSynth.feederOvertime,
+      confirmedSynth?.feederOvertime ?? 0
     );
   }, [
     basicResult.overtimePeople,
     confirmedResult?.overtimePeople,
+    basicSynth.feederOvertime,
+    confirmedSynth?.feederOvertime,
     setManualPlanOvertime,
   ]);
 
