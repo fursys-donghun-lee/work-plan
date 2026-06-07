@@ -66,10 +66,7 @@ export function CompanyMainDashboard({ company }: Props) {
   const workGroups = useDataStore((s) => s.workGroups);
   const lineBase = useDataStore((s) => s.lineBase);
   const overtimeConfirmed = useDataStore((s) => s.overtimeConfirmed);
-  // 수동 배치 (대림 포장2라인 /plan) 기준 잔업 인원
-  const manualPlanOvertimeBasic = useDataStore(
-    (s) => s.manualPlanOvertimeBasic
-  );
+  // 수동 배치 (대림 포장2라인 /plan) 확정 기준 잔업 인원
   const manualPlanOvertimeConfirmed = useDataStore(
     (s) => s.manualPlanOvertimeConfirmed
   );
@@ -444,8 +441,8 @@ export function CompanyMainDashboard({ company }: Props) {
         };
       }
       if (category === "포장2라인") {
-        // 포장2라인 잔업필요 = 수동 배치(/plan) 의 기본 배치 기준 잔업 인원
-        // (basicResult.overtimePeople = synthesizeResult(initialAssignments))
+        // 포장2라인 잔업필요 = 수동 배치(/plan) 의 '확정된 배치' 잔업 인원
+        // (임시셀 등으로 잔업이 늘 수 있어 확정 기준이 가장 실제와 가까움)
         const directGroups = package2.groups.filter((g) => g.group !== "피더");
         const directPresent = directGroups.reduce(
           (s, g) => s + g.presentMembers.length,
@@ -457,7 +454,7 @@ export function CompanyMainDashboard({ company }: Props) {
         const supportable =
           diff > 0 ? Math.min(Math.floor(diff / 8), directPresent) : 0;
         return {
-          overtime: manualPlanOvertimeBasic,
+          overtime: manualPlanOvertimeConfirmed,
           supportable,
           sent: directGroups.reduce((s, g) => s + sentByGroup(g.group), 0),
           received: receiveOrZero("포장2라인"),
