@@ -443,8 +443,8 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       } catch (e) {
         const code = (e as { code?: string })?.code ?? String(e);
         console.error("[SyncProvider] write 실패", e);
-        // 문서 크기 정보 (디버깅용)
-        const sizeKB = (mergedBody.length / 1024).toFixed(0);
+        // 문서 크기 정보 (디버깅용) — 로컬 state 기준 추정
+        const sizeKB = (localBody.length / 1024).toFixed(0);
         const isPersistent =
           code === "permission-denied" ||
           code.includes("resource-exhausted") ||
