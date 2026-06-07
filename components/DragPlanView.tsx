@@ -442,13 +442,21 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
         const cnt = (cw[line]?.[h] ?? []).length;
         const r = ratePerHour(cnt, isAuto);
         const tcAtH = tcContribByLine[line]?.[h] ?? 0;
+        // 임시셀 워커 수 (이 라인, 이 시각에 활성인 임시셀들의 인원 합)
+        const tcWorkersAtH = tempCells.reduce((s, tc) => {
+          if (tc.line === line && h >= tc.startWt && h < tc.endWt) {
+            return s + tc.workers.length;
+          }
+          return s;
+        }, 0);
+        const totalCntAtH = cnt + tcWorkersAtH;
         if (h < STANDARD) {
           regularWork += r + tcAtH;
         } else {
           otWork += r + tcAtH;
-          if (cnt > 0) {
+          if (totalCntAtH > 0) {
             otCells++;
-            maxOtHc = Math.max(maxOtHc, cnt);
+            maxOtHc = Math.max(maxOtHc, totalCntAtH);
             otOperationEnd = Math.max(otOperationEnd, h + 1);
           }
         }
@@ -496,6 +504,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       inTempCellLookup,
       tcContribByLine,
       tempCellDoneByLine,
+      tempCells,
     ]
   );
 
@@ -512,6 +521,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       inTempCellLookup,
       tcContribByLine,
       tempCellDoneByLine,
+      tempCells,
     ]
   );
 
@@ -532,6 +542,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
       inTempCellLookup,
       tcContribByLine,
       tempCellDoneByLine,
+      tempCells,
     ]
   );
 
@@ -1367,6 +1378,8 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
         displayName={displayName(tempCellModalLine)}
         allWorkers={allWorkerNames}
         existing={tempCellsByLine[tempCellModalLine] ?? []}
+        assignments={displayAssignments}
+        allTempCells={tempCells}
         onAdd={(tc) => setTempCells((prev) => [...prev, tc])}
         onRemove={(id) =>
           setTempCells((prev) => prev.filter((t) => t.id !== id))
@@ -1384,6 +1397,8 @@ function TempCellModal({
   displayName,
   allWorkers,
   existing,
+  assignments,
+  allTempCells,
   onAdd,
   onRemove,
   onClose,
@@ -1392,6 +1407,8 @@ function TempCellModal({
   displayName: string;
   allWorkers: string[];
   existing: ManualTempCell[];
+  assignments: Record<string, string[]>;
+  allTempCells: ManualTempCell[];
   onAdd: (tc: ManualTempCell) => void;
   onRemove: (id: string) => void;
   onClose: () => void;
@@ -1408,6 +1425,35 @@ function TempCellModal({
         ? 0.6
         : 2;
   const processed = span * rate;
+
+  // 선택한 시간 범위에서 작업이 없는 워커 집합 (노랑색 강조용)
+  const freeWorkers = useMemo(() => {
+    const s = new Set<string>();
+    const startH = Math.floor(startWt);
+    const endH = Math.ceil(endWt);
+    for (const w of allWorkers) {
+      let busy = false;
+      for (let h = startH; h < endH; h++) {
+        if (assignments[w]?.[h]) {
+          busy = true;
+          break;
+        }
+        for (const tc of allTempCells) {
+          if (
+            tc.workers.includes(w) &&
+            h >= tc.startWt &&
+            h < tc.endWt
+          ) {
+            busy = true;
+            break;
+          }
+        }
+        if (busy) break;
+      }
+      if (!busy) s.add(w);
+    }
+    return s;
+  }, [allWorkers, startWt, endWt, assignments, allTempCells]);
 
   const toggleWorker = (w: string) => {
     setSelectedWorkers((prev) =>
@@ -1516,8 +1562,15 @@ function TempCellModal({
                     "text-xs px-2 py-1 rounded border font-medium",
                     selectedWorkers.includes(w)
                       ? "bg-purple-500 text-white border-purple-500"
-                      : "border-slate-300 hover:bg-slate-50 text-slate-700"
+                      : freeWorkers.has(w)
+                        ? "bg-yellow-200 hover:bg-yellow-300 border-yellow-400 text-slate-800"
+                        : "border-slate-300 hover:bg-slate-50 text-slate-700"
                   )}
+                  title={
+                    freeWorkers.has(w)
+                      ? "이 시간대에 작업 없음 (가용)"
+                      : "이 시간대에 이미 작업 중"
+                  }
                 >
                   {w}
                 </button>
