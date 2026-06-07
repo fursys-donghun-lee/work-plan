@@ -734,6 +734,10 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
   //   예) A(h=8,9) 잔업 + 그 후 B(h=10) 1h → B carry < 2 라도 유지
   useEffect(() => {
     if (readOnly) return;
+    // 확정된 계획이 있으면 auto-drop 중단 (확정 해제 후에도 사용자가
+    // 직접 편집할 때까지 assignments == confirmed 유지)
+    // → 확정 무효화 cascade 방지 → 불필요한 Firestore 쓰기 방지
+    if (confirmed) return;
     // 워커별 라인별 OT 셀 카운트 (∑h=8..10)
     const otCellsOfWorker: Record<string, Record<string, number>> = {};
     for (const w of Object.keys(assignments)) {
@@ -802,6 +806,7 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     lineMeta,
     loadByLine,
     assignments,
+    confirmed,
     readOnly,
   ]);
 

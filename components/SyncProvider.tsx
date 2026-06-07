@@ -402,7 +402,16 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           useDataStore.setState(stripUndefined(merged) as never, false);
         }
 
-        // 6) Firestore 에 merged 푸시
+        // 6) merged 가 원격과 같으면 쓰기 생략 (이미 동기화됨)
+        const remoteBody = JSON.stringify(remoteSynced);
+        if (mergedBody === remoteBody) {
+          lastWriteRef.current = mergedBody;
+          localPendingRef.current = false;
+          setStatus({ kind: "ok" });
+          return;
+        }
+
+        // 7) Firestore 에 merged 푸시
         await setDoc(ref, {
           ...(sanitizeForFirestore(merged) as Record<string, unknown>),
           _updatedAt: serverTimestamp(),
@@ -421,6 +430,10 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
                 ? "Firestore 용량 초과 — 문서가 너무 큼 (1MB 제한)"
                 : code,
         });
+        // 5초 후 자동 재시도 (전송 실패 후에도 다음 변경 기다리지 않고 복구)
+        setTimeout(() => {
+          if (!inflight) flush();
+        }, 5000);
         localPendingRef.current = false;
       } finally {
         inflight = false;
