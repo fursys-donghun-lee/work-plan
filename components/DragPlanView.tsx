@@ -224,6 +224,25 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     [result.timelines]
   );
 
+  // 임시셀 배제 raw 뷰 — auto-drop 판정/잔업인원 카운트용
+  // (임시셀은 담당자가 구성할지 모르는 가변요소라 OT 결정시 배제)
+  const rawCellWorkers = useMemo(() => {
+    const m: Record<string, string[][]> = {};
+    for (const line of lineNames) {
+      m[line] = Array.from({ length: HOUR_COUNT }, () => [] as string[]);
+    }
+    for (const w of Object.keys(displayAssignments)) {
+      const arr = displayAssignments[w];
+      for (let h = 0; h < HOUR_COUNT; h++) {
+        const line = arr[h];
+        if (!line) continue;
+        if (!m[line]) m[line] = Array.from({ length: HOUR_COUNT }, () => []);
+        m[line][h].push(w);
+      }
+    }
+    return m;
+  }, [displayAssignments, lineNames]);
+
   // 라인별·시간별 현재 작업자 (확정 보기 중이면 스냅샷 기준)
   // 임시셀에 들어간 워커는 그 시각 메인 라인에서 제외 (임시셀 sub-row 에 표시됨)
   const cellWorkers = useMemo(() => {
@@ -695,17 +714,18 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     for (const line of lineNames) {
       const isAuto = lineMeta[line]?.autoManaged ?? false;
       if (isAuto) continue;
+      // 임시셀 배제 raw 뷰 사용 — 임시셀 처리량(tcContrib)도 미반영
+      // 이유: 임시셀은 담당자가 구성할지 안할지 모르는 가변요소
       let regularDone = 0;
       for (let h = 0; h < 8; h++) {
-        const cnt = (cellWorkers[line]?.[h] ?? []).length;
+        const cnt = (rawCellWorkers[line]?.[h] ?? []).length;
         regularDone += ratePerHour(cnt, isAuto);
-        regularDone += tcContribByLine[line]?.[h] ?? 0;
       }
       const load = loadByLine[line] ?? 0;
       const carry = Math.max(0, load - regularDone);
       let otHc = 0;
       for (let h = 8; h < HOUR_COUNT; h++) {
-        otHc = Math.max(otHc, (cellWorkers[line]?.[h] ?? []).length);
+        otHc = Math.max(otHc, (rawCellWorkers[line]?.[h] ?? []).length);
       }
       if (otHc === 0) continue;
       if (carry >= 2 - 1e-6) continue;
@@ -734,11 +754,11 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     });
   }, [
     cellWorkers,
+    rawCellWorkers,
     lineNames,
     lineMeta,
     loadByLine,
     assignments,
-    tcContribByLine,
     readOnly,
   ]);
 
