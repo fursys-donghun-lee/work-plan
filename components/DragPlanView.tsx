@@ -123,6 +123,31 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
     return Array.from(s).sort();
   }, [lineWorkers]);
 
+  // 잔업시간(h=8~10) 에 메인/임시셀 어디에도 배치 안 된 워커 (임시셀 후보)
+  const idleWorkersInOT = useMemo(() => {
+    const idle: string[] = [];
+    for (const w of allWorkerNames) {
+      let hasOT = false;
+      for (let h = 8; h < MAX_WORKTIME; h++) {
+        if (displayAssignments[w]?.[h]) {
+          hasOT = true;
+          break;
+        }
+        const inTC = tempCells.some(
+          (tc) =>
+            tc.workers.includes(w) && h >= tc.startWt && h < tc.endWt
+        );
+        if (inTC) {
+          hasOT = true;
+          break;
+        }
+      }
+      if (!hasOT) idle.push(w);
+    }
+    return idle;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [allWorkerNames, displayAssignments, tempCells]);
+
   // 워커가 임시셀에 들어가는 시각 lookup — 메인 행에서 그 시간만큼 빠짐 처리용
   const inTempCellLookup = useMemo(() => {
     const m: Record<string, Set<number>> = {};
@@ -347,6 +372,26 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
 
   // 라인 메타 조회용 (lineMetaEarly 위에서 정의됨, 별칭만)
   const lineMeta = lineMetaEarly;
+
+  // 임시셀 추천 라인 — 잔여부하(임시셀 배제 raw 뷰 기준) 큰 순
+  const tempCellSuggestedLines = useMemo(() => {
+    type Suggest = { line: string; remaining: number };
+    const out: Suggest[] = [];
+    for (const line of lineNames) {
+      const isAuto = lineMeta[line]?.autoManaged ?? false;
+      if (isAuto) continue;
+      let regularDone = 0;
+      for (let h = 0; h < 8; h++) {
+        const cnt = (rawCellWorkers[line]?.[h] ?? []).length;
+        regularDone += ratePerHour(cnt, isAuto);
+      }
+      const load = loadByLine[line] ?? 0;
+      const remaining = Math.max(0, load - regularDone);
+      if (remaining > 0.5) out.push({ line, remaining });
+    }
+    out.sort((a, b) => b.remaining - a.remaining);
+    return out;
+  }, [lineNames, lineMeta, rawCellWorkers, loadByLine]);
 
   // 합성 ReallocResult 헬퍼 — assignments 소스를 받아 result + 피더 잔업 인원 반환
   // ReallocResult.overtimePeople 은 '직접 인원만' (피더 제외)
@@ -999,6 +1044,41 @@ export function DragPlanView({ result, rBasic, lineWorkers }: Props) {
           </button>
         </div>
       </div>
+
+      {/* 임시셀 구성 추천 — 잔업시간 유휴 워커 + 잔여부하 있는 라인 */}
+      {!readOnly &&
+        idleWorkersInOT.length > 0 &&
+        tempCellSuggestedLines.length > 0 && (
+          <div className="mb-3 border border-purple-200 bg-purple-50/60 rounded-lg p-2.5">
+            <div className="text-xs text-purple-900 font-semibold mb-1.5 flex items-center gap-1">
+              <span>💡 임시셀 구성 추천</span>
+              <span className="text-[10px] font-normal text-purple-700">
+                18:00~21:00 비어있는 워커 {idleWorkersInOT.length}명
+                ({idleWorkersInOT.slice(0, 6).join(", ")}
+                {idleWorkersInOT.length > 6
+                  ? ` 외 ${idleWorkersInOT.length - 6}명`
+                  : ""}
+                )
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-1">
+              {tempCellSuggestedLines.slice(0, 6).map((s) => (
+                <button
+                  key={s.line}
+                  type="button"
+                  onClick={() => setTempCellModalLine(s.line)}
+                  className="text-[11px] px-2 py-1 rounded bg-white border border-purple-300 hover:bg-purple-100 text-purple-800 font-medium"
+                  title={`${displayName(s.line)} 임시셀 구성 (잔여 ${s.remaining.toFixed(1)}인시)`}
+                >
+                  {displayName(s.line)}{" "}
+                  <span className="text-purple-600">
+                    {s.remaining.toFixed(1)}인시
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
 
       <div>
         <table className="text-xs border-collapse w-full table-fixed">
