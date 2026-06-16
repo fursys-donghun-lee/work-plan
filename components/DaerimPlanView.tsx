@@ -37,23 +37,23 @@ export function DaerimPlanView() {
   // 탭 (재배치 계획 / 수동 배치)
   const [tab, setTab] = useState<"main" | "drag">("drag");
 
-  // 대림 추가 카테고리 출근 계산 — 메인 대시보드와 동일 로직
-  // - 포장철물: 포장철물 키워드 (category/department/baseLocation/position 중)
-  // - 소사장: '사장님' 키워드 포함
-  // - 피더: useDaerimRealloc 의 feederPresentCount (package2.groups['피더']) 사용
-  // - 직접: 전체 대림 출근 - 소사장 - 피더 - 포장철물 (메인 대시보드와 합 일치)
+  // 대림 추가 카테고리 출근 계산 — 메인 대시보드 분류와 정확히 동일
+  // 메인 대시보드 분류 (CompanyMainDashboard.summaryMap):
+  //   1. 포장철물 키워드 매칭 → "포장철물"
+  //   2. 그 외 → e.category 그대로 (예: "대림 사장님" → 소사장 표기, "포장2라인" 등)
+  // 메인 대시보드 포장2라인 row = (e.category === "포장2라인") - feederPresentCount
   const daerimExtras = useMemo(() => {
     const presentCodes = new Set<string>();
     for (const a of attendance) {
       if (a.isPresent) presentCodes.add(a.empCode);
     }
-    let totalDaerimPresent = 0;
     let sajangPresent = 0;
     let pojangCheolMulPresent = 0;
+    let pojang2CategoryCount = 0; // e.category === "포장2라인" (피더 포함)
+    let otherCategoryCount = 0;
     for (const e of employees) {
       if (!e.department.includes("대림산업")) continue;
       if (!presentCodes.has(e.empCode)) continue;
-      totalDaerimPresent += 1;
       const hasPCM =
         e.category.includes("포장철물") ||
         e.department.includes("포장철물") ||
@@ -67,18 +67,23 @@ export function DaerimPlanView() {
         sajangPresent += 1;
         continue;
       }
+      if (e.category === "포장2라인") {
+        pojang2CategoryCount += 1;
+        continue;
+      }
+      otherCategoryCount += 1;
     }
-    // 직접 = 전체 - 피더 - 소사장 - 포장철물 (메인 대시보드 포장2라인 행과 동일)
-    const directWorkerCount =
-      totalDaerimPresent -
-      sajangPresent -
-      feederPresentCount -
-      pojangCheolMulPresent;
+    // 직접 = 포장2라인 category 출근 - 피더 (메인 대시보드 포장2라인 행과 동일)
+    const directWorkerCount = Math.max(
+      0,
+      pojang2CategoryCount - feederPresentCount
+    );
     return {
       sajangPresent,
       feederPresent: feederPresentCount,
       pojangCheolMulPresent,
-      directWorkerCount: Math.max(0, directWorkerCount),
+      directWorkerCount,
+      otherCategoryCount,
     };
   }, [employees, attendance, feederPresentCount]);
 
