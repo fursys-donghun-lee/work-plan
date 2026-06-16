@@ -115,7 +115,9 @@ export function Package2LineView() {
     return Math.max(0, Math.min(sup, a.selectedCount));
   };
 
-  // 포장철물 출근 인원 (메인 대시보드와 동일 매칭)
+  // 포장철물 출근 인원 + 부하 (메인 대시보드 매칭 + loadPlan 기반)
+  // 부하: loadPlan.equipmentName 이 "#포장철물 자동화 설비" / "#포장철물(2라인)" 인 행의
+  //       todayQty (G열) 합 / todayHours (H열) 합
   const pojangCheolMul = useMemo(() => {
     const presentCodes = new Set<string>();
     for (const a of attendance) {
@@ -135,8 +137,21 @@ export function Package2LineView() {
         present.push({ empCode: e.empCode, name: e.name });
       else absent.push({ empCode: e.empCode, name: e.name });
     }
-    return { present, absent };
-  }, [employees, attendance]);
+    // 부하 합산 — equipmentName 매칭
+    const PCM_NAMES = new Set([
+      "#포장철물 자동화 설비",
+      "#포장철물(2라인)",
+    ]);
+    let todayQty = 0;
+    let loadHours = 0;
+    for (const row of loadPlan) {
+      const name = (row.equipmentName ?? "").trim();
+      if (!PCM_NAMES.has(name)) continue;
+      todayQty += row.todayQty ?? 0;
+      loadHours += row.todayHours ?? 0;
+    }
+    return { present, absent, todayQty, loadHours };
+  }, [employees, attendance, loadPlan]);
 
   // 받은 지원 슬롯 목록 (각 슬롯이 어디서 왔는지 정보 포함)
   const receivedSlots: { fromGroup: string }[] = [];
@@ -676,6 +691,8 @@ export function Package2LineView() {
         <PojangCheolMulCard
           present={pojangCheolMul.present}
           absent={pojangCheolMul.absent}
+          todayQty={pojangCheolMul.todayQty}
+          loadHours={pojangCheolMul.loadHours}
         />
       </div>
 
@@ -744,33 +761,117 @@ function SummaryStat({
   );
 }
 
-// 포장철물 카드 — 그룹 카드와 비슷한 스타일, 부하는 메인 대시보드 트리거 기준
+// 포장철물 카드 — 그룹 카드와 동일 스타일
+// 부하: loadPlan 의 '#포장철물 자동화 설비' + '#포장철물(2라인)' 합산
+// 판정: diff < 0 → 잔업필요, diff > 0 → 지원가능
 function PojangCheolMulCard({
   present,
   absent,
+  todayQty,
+  loadHours,
 }: {
   present: { empCode: string; name: string }[];
   absent: { empCode: string; name: string }[];
+  todayQty: number;
+  loadHours: number;
 }) {
   const total = present.length + absent.length;
+  const presentCount = present.length;
+  const availableHours = presentCount * 8;
+  const diffHours = Math.round((availableHours - loadHours) * 10) / 10;
+  const shortage = diffHours < 0 ? Math.abs(diffHours) : 0;
+  const overtime =
+    shortage > 0 ? Math.min(Math.ceil(shortage / 3), presentCount) : 0;
+  const remainAfterOT = Math.max(
+    0,
+    Math.round((shortage - overtime * 3) * 10) / 10
+  );
+  const supportNeeded = remainAfterOT > 0 ? Math.ceil(remainAfterOT / 8) : 0;
+  const supportable =
+    diffHours > 0 ? Math.min(Math.floor(diffHours / 8), presentCount) : 0;
+
+  const judgement: "정상" | "잔업필요" | "지원필요" | "지원가능" =
+    supportNeeded > 0
+      ? "지원필요"
+      : diffHours < 0
+        ? "잔업필요"
+        : supportable > 0
+          ? "지원가능"
+          : "정상";
+  const judgementClass =
+    judgement === "지원필요"
+      ? "badge-red"
+      : judgement === "잔업필요"
+        ? "badge-red"
+        : judgement === "지원가능"
+          ? "badge-blue"
+          : "badge-green";
+
   return (
-    <div className="card border-indigo-200 bg-indigo-50/40">
+    <div
+      className={cn(
+        "card border-indigo-200 bg-indigo-50/40",
+        judgement === "잔업필요" || judgement === "지원필요"
+          ? "border-rose-300 bg-rose-50/30"
+          : judgement === "지원가능"
+            ? "border-emerald-200 bg-emerald-50/30"
+            : null
+      )}
+    >
       <div className="flex items-start justify-between mb-2">
         <h3 className="font-bold text-slate-900">포장철물</h3>
-        <span className="badge bg-indigo-100 text-indigo-800 border-indigo-300">
-          간접
-        </span>
+        <span className={cn("badge", judgementClass)}>{judgement}</span>
       </div>
 
       <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-xs mb-3">
         <span className="text-slate-500">출근/기준</span>
         <span className="text-right font-medium">
-          {present.length} / {total}
+          {presentCount} / {total}
         </span>
-        <span className="text-slate-500">미출근</span>
-        <span className="text-right font-medium text-rose-700">
-          {absent.length}명
+        <span className="text-slate-500">계획수량</span>
+        <span className="text-right font-medium">
+          {todayQty.toLocaleString()}
         </span>
+        <span className="text-slate-500">총부하</span>
+        <span className="text-right font-medium">{formatDecimal(loadHours)}h</span>
+        <span className="text-slate-500">가용</span>
+        <span className="text-right font-medium">
+          {formatDecimal(availableHours)}h
+        </span>
+        <span className="text-slate-500">여유/부족</span>
+        <span
+          className={cn(
+            "text-right font-medium",
+            diffHours < 0 ? "text-rose-700" : "text-emerald-700"
+          )}
+        >
+          {diffHours >= 0 ? "+" : ""}
+          {formatDecimal(diffHours)}h
+        </span>
+        {overtime > 0 && (
+          <>
+            <span className="text-slate-500">잔업필요</span>
+            <span className="text-right font-medium text-rose-700">
+              {overtime}명 × 3h
+            </span>
+          </>
+        )}
+        {supportNeeded > 0 && (
+          <>
+            <span className="text-slate-500">지원필요</span>
+            <span className="text-right font-medium text-rose-700">
+              {supportNeeded}명
+            </span>
+          </>
+        )}
+        {supportable > 0 && (
+          <>
+            <span className="text-slate-500">지원가능</span>
+            <span className="text-right font-medium text-blue-700">
+              {supportable}명
+            </span>
+          </>
+        )}
       </div>
 
       {present.length > 0 ? (
@@ -793,11 +894,8 @@ function PojangCheolMulCard({
       )}
 
       {absent.length > 0 && (
-        <div className="mt-2">
-          <div className="text-[11px] text-slate-500 mb-1">미출근</div>
-          <div className="text-xs text-slate-400">
-            {absent.map((m) => m.name).join(", ")}
-          </div>
+        <div className="mt-2 text-[11px] text-slate-400">
+          미출근: {absent.map((m) => m.name).join(", ")}
         </div>
       )}
     </div>

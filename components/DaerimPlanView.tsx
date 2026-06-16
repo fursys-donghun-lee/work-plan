@@ -212,15 +212,12 @@ export function DaerimPlanView() {
           companyKey="대림산업"
           feederPresentCount={daerimExtras.feederPresent}
           computeExtraConfirmData={(m) => {
-            // 포장철물 잔업확정: 잔여부하 / 포장철물 출근 인원 ≥ 2시간
+            // 포장철물 잔업확정: 포장2라인 직접 잔업확정 ≥ 1명이면 포장철물 출근 전원 잔업
             const sajang = daerimExtras.sajangPresent;
             const feeder = daerimExtras.feederPresent;
             const pcm = daerimExtras.pojangCheolMulPresent;
-            // 직접 인원 = 메인 대시보드 포장2라인 행 (전체 - 사장님 - 피더 - 포장철물)
             const directWorkers = daerimExtras.directWorkerCount;
-            const loadPerPerson = pcm > 0 ? m.totalCarry / pcm : 0;
-            const pojangCheolMulOTConfirmed =
-              loadPerPerson >= 2 - 1e-6 ? pcm : 0;
+            const pojangCheolMulOTConfirmed = m.overtimeDirect >= 1 ? pcm : 0;
 
             // 예상생산액 — 총 출근 × 4.2M + 총 잔업 × 1.5M
             const totalDirect = directWorkers + sajang + feeder + pcm;
