@@ -219,6 +219,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const lastWriteRef = useRef<string>("");
   const ignoreNextRemoteRef = useRef<boolean>(false);
   const localPendingRef = useRef<boolean>(false);
+  // 초기 snapshot 수신 전에는 local 변경 → Firestore 쓰기 차단
+  // (각 PC localStorage hydration 으로 stale 데이터가 Firestore 덮어쓰는 것 방지)
+  const initialSyncDoneRef = useRef<boolean>(false);
 
   // 0) 익명 인증 — Firestore 규칙(request.auth != null) 통과용
   useEffect(() => {
@@ -287,13 +290,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
             }).catch((e) => console.warn("[SyncProvider] initial push", e));
             lastWriteRef.current = JSON.stringify(cur);
           }
+          initialSyncDoneRef.current = true;
           setHydrated(true);
           return;
         }
 
-        // 로컬 변경이 디바운스/전송 진행 중이면 원격 snapshot 검사:
-        // - 우리 자신의 write 가 돌아왔으면 ack 처리 (pending 해제)
-        // - 그 외 stale snapshot 은 무시
         const data = snap.data();
         const synced = pickSynced(data);
         const remoteBody = JSON.stringify(synced);
@@ -301,43 +302,24 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (localPendingRef.current) {
           if (remoteBody === lastWriteRef.current) {
             localPendingRef.current = false;
+            initialSyncDoneRef.current = true;
             setHydrated(true);
           }
-          // 다른 stale snapshot 은 무시
           return;
         }
 
-        // 비어있는 원격 값으로 로컬 의미있는 값을 덮어쓰지 않기
-        const local = useDataStore.getState() as unknown as Record<
-          string,
-          unknown
-        >;
-        const { merged, preservedFromLocal } = mergePreserveLocal(synced, local);
-        const body = JSON.stringify(merged);
-
-        if (body === lastWriteRef.current) {
-          setHydrated(true);
-          return;
-        }
-
+        // 초기 동기화: 원격을 source of truth 로 신뢰 (로컬 stale 데이터 보존 안 함)
+        // → 다중 PC 에서 같은 데이터 보장
+        // → 원격이 비어있는 첫 사용자 케이스는 위 !snap.exists() 분기에서 처리
         ignoreNextRemoteRef.current = true;
-        useDataStore.setState(stripUndefined(merged) as never, false);
-        lastWriteRef.current = body;
+        useDataStore.setState(stripUndefined(synced) as never, false);
+        lastWriteRef.current = remoteBody;
+        initialSyncDoneRef.current = true;
         setHydrated(true);
-
-        // 원격이 비어있어 로컬을 보존했다면, 그 값을 Firestore 에 다시 push
-        // (다음 사용자도 동일 데이터 보게 함)
-        if (preservedFromLocal) {
-          void setDoc(ref, {
-            ...(sanitizeForFirestore(merged) as Record<string, unknown>),
-            _updatedAt: serverTimestamp(),
-          }).catch((e) =>
-            console.warn("[SyncProvider] preserve-local push", e)
-          );
-        }
       },
       (err) => {
         console.warn("[SyncProvider] onSnapshot 에러", err);
+        initialSyncDoneRef.current = true;
         setHydrated(true);
       }
     );
@@ -477,6 +459,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         ignoreNextRemoteRef.current = false;
         return;
       }
+      // 초기 동기화 완료 전에는 local 변경 → 쓰기 차단
+      // (localStorage hydration 으로 stale 데이터가 Firestore 덮어쓰는 것 방지)
+      if (!initialSyncDoneRef.current) return;
       if (
         shallowEqualSynced(
           curr as unknown as Record<string, unknown>,
@@ -552,8 +537,10 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       }
     };
 
+    // plan 문서 초기 sync 완료 후에만 쓰기 허용 — 별도 ref
+    let planInitialSyncDone = false;
     const unsubStore = useDataStore.subscribe((curr, prev) => {
-      // PLAN_KEYS 중 변경된 게 있는지 확인
+      if (!planInitialSyncDone) return;
       let changed = false;
       for (const k of PLAN_KEYS) {
         if (
@@ -567,6 +554,12 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
       if (!changed) return;
       if (timer) clearTimeout(timer);
       timer = setTimeout(flush, 800);
+    });
+
+    // plan onSnapshot 첫 발화 후 sync 완료 표시
+    const unsubInitial = onSnapshot(ref, () => {
+      planInitialSyncDone = true;
+      unsubInitial();
     });
 
     return () => {
