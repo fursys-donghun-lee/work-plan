@@ -339,9 +339,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
     // 비-meta 필드(사용자 편집 필드) — 로컬 변경 감지로 충돌 방지
     const NON_META_FIELDS = SYNCED_KEYS.filter(
-      (k) =>
-        !META_PAIRS.some((p) => p.data === k || p.meta === k) &&
-        k !== "workDate"
+      (k) => !META_PAIRS.some((p) => p.data === k || p.meta === k)
     );
 
     const flush = async () => {
