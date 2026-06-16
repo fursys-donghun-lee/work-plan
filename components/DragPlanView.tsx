@@ -788,14 +788,36 @@ export function DragPlanView({
     });
   }, [cellWorkers, lineNames, loadByLine, consumed, lineMeta]);
 
+  // 라인 정렬 — 고정 순서 (사용자 지정)
+  const FIXED_LINE_ORDER = [
+    "MA-01",
+    "MA-02",
+    "MA-03",
+    "MM-01",
+    "MM-02",
+    "MM-03",
+    "MM-04",
+    "MM-05",
+    "PA-03",
+    "PA-04",
+    "PA-05",
+    "PA-06",
+    "PA-07",
+    "자동포장라인",
+  ];
   const displayLines = useMemo(() => {
+    const orderIdx = (line: string) => {
+      const idx = FIXED_LINE_ORDER.indexOf(line);
+      return idx === -1 ? FIXED_LINE_ORDER.length : idx;
+    };
     return [...lineNames].sort((a, b) => {
-      const pa = stickyPriorities[a] ?? 2;
-      const pb = stickyPriorities[b] ?? 2;
-      if (pa !== pb) return pa - pb;
+      const ia = orderIdx(a);
+      const ib = orderIdx(b);
+      if (ia !== ib) return ia - ib;
       return a.localeCompare(b);
     });
-  }, [lineNames, stickyPriorities]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lineNames]);
 
   // 잔업 자동 빠짐 — 확정/보기 중에는 실행하지 않음
   // 빠짐 조건: 잔여부하(carry) < 2인시 (정규시간에 거의 다 끝났음)
