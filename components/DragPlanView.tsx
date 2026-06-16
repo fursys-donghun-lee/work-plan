@@ -302,14 +302,9 @@ export function DragPlanView({
     }
   }, [confirmed]);
 
-  // 확정해제 + 수정시 localStorage 정리 (잠금 풀린 상태에서 assignments 가 confirmed 와 달라지면)
-  useEffect(() => {
-    if (locked || !confirmed || typeof window === "undefined") return;
-    if (JSON.stringify(assignments) !== JSON.stringify(confirmed)) {
-      setConfirmed(null);
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
-  }, [assignments, confirmed, locked]);
+  // (확정 해제 후 편집 감지 effect 는 제거 — 의도치 않게 confirmed 가 사라져
+  //  탭 전환 시 확정 상태가 바뀌어 보이는 문제 방지.
+  //  이제 confirmed 는 명시적 '확정 해제' 클릭 OR 자정 만료 시에만 풀림.)
 
   // 입력 순서의 라인 이름 (계산용 — sort 전 단계)
   const lineNames = useMemo(
@@ -1054,11 +1049,16 @@ export function DragPlanView({
     setAutoMoveLog(log);
   };
 
-  // 확정 토글 — 잠금이 풀려있으면 현재 assignments 를 스냅샷+잠금, 잠금이면 해제
-  // 확정시 localStorage 에 저장 (그날 24:00 만료)
+  // 확정 토글
+  // - 잠금 풀려있으면: 현재 assignments 스냅샷 + 잠금 + localStorage 저장 (24:00 만료)
+  // - 잠금 상태면: 잠금 해제 + confirmed 정리 + localStorage 제거 (다음 확정까지 새 상태)
   const handleConfirmToggle = () => {
     if (locked) {
       setLocked(false);
+      setConfirmed(null);
+      if (typeof window !== "undefined") {
+        window.localStorage.removeItem(STORAGE_KEY);
+      }
       return;
     }
     const snap = JSON.parse(JSON.stringify(assignments)) as Record<
