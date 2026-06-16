@@ -134,7 +134,7 @@ function DailyPlansContent() {
           tone="emerald"
         />
         <SummaryCard
-          label="평균 시간당 생산액"
+          label="평균 시간당생산액"
           value={formatMoney(totalProdPerHour)}
           tone="indigo"
         />
@@ -190,7 +190,7 @@ function DailyPlansContent() {
                 </span>
                 <span className="text-slate-400 mx-2">·</span>
                 <span>
-                  시간당{" "}
+                  시간당생산액{" "}
                   <span className="font-semibold text-indigo-700">
                     {formatMoney(dailyPerHour)}
                   </span>
@@ -211,7 +211,7 @@ function DailyPlansContent() {
                     <th>총 부하</th>
                     <th>예상 근무시간</th>
                     <th>예상 생산액</th>
-                    <th>시간당</th>
+                    <th>시간당생산액</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -237,7 +237,7 @@ function DailyPlansContent() {
                           </span>
                         </td>
                         <td className="text-center text-slate-500">
-                          {r.sajangPresent ?? "-"}
+                          {r.sajangPresent ?? 0}
                         </td>
                         <td className="text-center text-slate-500">
                           {r.feederPresent}
@@ -246,7 +246,7 @@ function DailyPlansContent() {
                           </span>
                         </td>
                         <td className="text-center text-slate-500">
-                          {r.pojangCheolMulPresent ?? "-"}
+                          {r.pojangCheolMulPresent ?? 0}
                           {(r.pojangCheolMulOTConfirmed ?? 0) > 0 && (
                             <span className="text-[10px] text-rose-600 ml-1">
                               ({r.pojangCheolMulOTConfirmed})
@@ -287,24 +287,26 @@ function DailyPlansContent() {
         <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
           <li>
             <b>총 출근</b> (대림 기준) = 직접 + 소사장 + 피더 + 포장철물
-            (메인 대시보드 출근 인원)
+            (메인 대시보드 출근 인원 표시용)
           </li>
           <li>
             <b>잔업 합계</b> = 직접 잔업 + 피더 잔업 + 포장철물 잔업(확정)
+            (표시용)
           </li>
           <li>
-            <b>포장철물 잔업확정</b>: 잔여부하(이월) / 포장철물 출근 인원
-            ≥ 2시간 → 포장철물 출근자 전원 잔업
+            <b>포장철물 잔업확정</b>: 포장2라인 직접 잔업확정 ≥ 1명이면
+            포장철물 출근자 전원 잔업
           </li>
           <li>
-            <b>예상 생산액</b> = 총 출근 × 4,200,000원 + 잔업 합계 ×
-            1,500,000원 (3h 잔업 기준)
+            <b>예상 생산액</b> = <span className="font-mono">직접 출근 ×
+            4,200,000원 + 직접 잔업인원 × 1,500,000원</span> (3h 잔업 기준,
+            소사장/피더/포장철물 미포함)
           </li>
           <li>
-            <b>예상 근무시간</b> = 총 출근 × 8h + 잔업 합계 × 3h × 1.5
+            <b>예상 근무시간</b> = 직접 출근 × 8h + 직접 잔업인원 × 3h × 1.5
           </li>
           <li>
-            <b>시간당 생산액</b> = 예상 생산액 ÷ 예상 근무시간
+            <b>시간당생산액</b> = 예상 생산액 ÷ 예상 근무시간
           </li>
         </ul>
       </div>

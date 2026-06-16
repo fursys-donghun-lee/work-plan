@@ -66,7 +66,7 @@ export function DaerimPlanView() {
         pojangCheolMulPresent += 1;
         continue;
       }
-      if (e.category.includes("사장님")) {
+      if (e.category.includes("사장님") || e.category.includes("소사장")) {
         sajangPresent += 1;
         continue;
       }
@@ -224,20 +224,21 @@ export function DaerimPlanView() {
             // 메인 대시보드 표시용 store 에 push
             setManualPlanPCMOvertimeConfirmed(pojangCheolMulOTConfirmed);
 
-            // 예상생산액 — 총 출근 × 4.2M + 총 잔업 × 1.5M
-            const totalDirect = directWorkers + sajang + feeder + pcm;
-            const totalOT =
-              m.overtimeDirect + m.overtimeFeeder + pojangCheolMulOTConfirmed;
+            // 예상 생산액 = 직접인원 × 4.2M + 직접 잔업인원 × 1.5M
+            // (소사장/피더/포장철물 잔업은 표시만 — 생산액 산식에 미포함)
             const expectedProduction =
-              totalDirect * 4_200_000 + totalOT * 1_500_000;
-            const expectedWorkHours = totalDirect * 8 + totalOT * 4.5;
+              directWorkers * 4_200_000 + m.overtimeDirect * 1_500_000;
+            const expectedWorkHours = directWorkers * 8 + m.overtimeDirect * 4.5;
             const expectedProductionPerHour =
               expectedWorkHours > 0
                 ? Math.round(expectedProduction / expectedWorkHours)
                 : 0;
 
+            const totalDirect = directWorkers + sajang + feeder + pcm;
+            const totalOT =
+              m.overtimeDirect + m.overtimeFeeder + pojangCheolMulOTConfirmed;
+
             return {
-              // direct 도 override — 메인 대시보드 기준
               directWorkers,
               sajangPresent: sajang,
               pojangCheolMulPresent: pcm,
@@ -245,8 +246,8 @@ export function DaerimPlanView() {
               expectedProduction,
               expectedWorkHours,
               expectedProductionPerHour,
-              totalAttendance: totalDirect,
-              totalOT: totalOT,
+              totalAttendance: totalDirect, // 표시용 합계
+              totalOT,
             };
           }}
           feederGroups={[
