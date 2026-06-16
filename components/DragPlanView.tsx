@@ -97,6 +97,35 @@ export function DragPlanView({
     null
   );
 
+  // 잔업 강제 OFF — 라인별 수동 토글 (carry ≥ 2 이라도 사용자가 잔업 안 한다고 결정)
+  const [lineOTDisabled, setLineOTDisabled] = useState<Record<string, boolean>>(
+    {}
+  );
+
+  const toggleLineOT = (line: string) => {
+    if (readOnly) return;
+    const willDisable = !lineOTDisabled[line];
+    setLineOTDisabled((prev) => ({ ...prev, [line]: willDisable }));
+    if (willDisable) {
+      // 잔업 OFF — 그 라인 OT 셀의 워커 즉시 제거
+      setAssignments((prev) => {
+        const next = { ...prev };
+        for (const w of Object.keys(next)) {
+          const arr = [...(next[w] ?? Array(HOUR_COUNT).fill(""))];
+          let changed = false;
+          for (let h = 8; h < HOUR_COUNT; h++) {
+            if (arr[h] === line) {
+              arr[h] = "";
+              changed = true;
+            }
+          }
+          if (changed) next[w] = arr;
+        }
+        return next;
+      });
+    }
+  };
+
   // 임시셀 라인별 시간당 처리량 (h=0..10)
   const tcContribByLine = useMemo(() => {
     const m: Record<string, number[]> = {};
@@ -869,7 +898,8 @@ export function DragPlanView({
         otHc = Math.max(otHc, (rawCellWorkers[line]?.[h] ?? []).length);
       }
       if (otHc === 0) continue;
-      if (carry >= 2 - 1e-6) continue;
+      // 잔업 강제 OFF 라인은 carry 무관하게 무조건 빠짐
+      if (!lineOTDisabled[line] && carry >= 2 - 1e-6) continue;
       for (let h = 8; h < HOUR_COUNT; h++) {
         const ws = cellWorkers[line]?.[h] ?? [];
         for (const w of ws) {
@@ -901,6 +931,7 @@ export function DragPlanView({
     loadByLine,
     assignments,
     confirmed,
+    lineOTDisabled,
     readOnly,
   ]);
 
@@ -944,6 +975,8 @@ export function DragPlanView({
       const oldLine = arr[destHour] ?? "";
       if (oldLine === destLine) return prev;
       for (let h = destHour; h < HOUR_COUNT; h++) {
+        // 잔업 OFF 라인 의 OT 셀(h=8~10)은 채우지 않음
+        if (h >= 8 && lineOTDisabled[destLine]) break;
         if (arr[h] === oldLine || arr[h] === "") arr[h] = destLine;
         else break;
       }
@@ -1316,6 +1349,30 @@ export function DragPlanView({
                       <div className="text-[9px] text-purple-700 font-semibold leading-tight whitespace-nowrap">
                         +임시 {(tempCellDoneByLine[line] ?? 0).toFixed(1)}인시
                       </div>
+                    )}
+                    {!isAuto && (
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          toggleLineOT(line);
+                        }}
+                        disabled={readOnly}
+                        className={cn(
+                          "text-[9px] leading-tight whitespace-nowrap mt-0.5 px-1 rounded border",
+                          lineOTDisabled[line]
+                            ? "bg-rose-100 border-rose-300 text-rose-700 font-semibold"
+                            : "bg-slate-50 border-slate-200 text-slate-500 hover:bg-slate-100",
+                          readOnly && "opacity-40 cursor-not-allowed"
+                        )}
+                        title={
+                          lineOTDisabled[line]
+                            ? "잔업 강제 OFF 해제 (자동 판정 복귀)"
+                            : "이 라인 잔업 안 함으로 강제"
+                        }
+                      >
+                        {lineOTDisabled[line] ? "잔업 X" : "잔업 ✓"}
+                      </button>
                     )}
                   </th>
                   <td className="border-b border-slate-100 pl-0 pr-1 py-1 text-center align-middle">
