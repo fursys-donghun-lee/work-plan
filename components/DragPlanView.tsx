@@ -44,6 +44,16 @@ interface Props {
   ) => void; // 메인 대시보드 전파용 (회사별 store 필드)
   companyKey?: string; // 일자별 근무계획 저장용 (Firestore dailyPlans 키)
   feederPresentCount?: number; // 피더 출근 인원 (선택)
+  // 확정 시 회사별 추가 메트릭 계산 콜백 (예: 소사장/포장철물 등)
+  computeExtraConfirmData?: (metrics: {
+    directWorkers: number;
+    overtimeDirect: number;
+    overtimeFeeder: number;
+    totalLoad: number;
+    totalCarry: number;
+    workHours: number;
+    idleHours: number;
+  }) => Record<string, unknown>;
 }
 
 // 11 시간 슬롯 (work-time 0..10)
@@ -67,6 +77,7 @@ export function DragPlanView({
   setOvertimeFn,
   companyKey,
   feederPresentCount = 0,
+  computeExtraConfirmData,
 }: Props) {
   // assignments[workerName] = [line at hour 0, ..., hour HOUR_COUNT-1]
   const initialAssignments = useMemo(() => {
@@ -1100,6 +1111,17 @@ export function DragPlanView({
       const d = new Date();
       const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
       const docId = `${dateStr}_${companyKey}`;
+      const extra = computeExtraConfirmData
+        ? computeExtraConfirmData({
+            directWorkers,
+            overtimeDirect,
+            overtimeFeeder,
+            totalLoad: confirmedSynthLocal.result.totalLoad,
+            totalCarry: confirmedSynthLocal.result.totalCarry,
+            workHours: confirmedSynthLocal.result.workHours,
+            idleHours: confirmedSynthLocal.result.idleHours,
+          })
+        : {};
       try {
         void setDoc(doc(getDb(), "dailyPlans", docId), {
           date: dateStr,
@@ -1116,6 +1138,7 @@ export function DragPlanView({
           workHours: confirmedSynthLocal.result.workHours,
           idleHours: confirmedSynthLocal.result.idleHours,
           totalCarry: confirmedSynthLocal.result.totalCarry,
+          ...extra,
         });
       } catch (e) {
         console.warn("[DragPlanView] dailyPlan write 실패", e);

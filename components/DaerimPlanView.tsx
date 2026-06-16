@@ -26,6 +26,8 @@ import { cn } from "@/lib/utils";
 export function DaerimPlanView() {
   const hydrated = useHydrated();
   const workDate = useDataStore((s) => s.workDate);
+  const employees = useDataStore((s) => s.employees);
+  const attendance = useDataStore((s) => s.attendance);
   const { groups, extraFree, missing, lineWorkers } = useDaerimRealloc();
   // 이동 override (간트 라벨 클릭으로 누가 갈지 지정)
   const [overrides, setOverrides] = useState<Record<string, string>>({});
@@ -33,6 +35,40 @@ export function DaerimPlanView() {
   const [tempCells, setTempCells] = useState<TempCell[]>([]);
   // 탭 (재배치 계획 / 수동 배치)
   const [tab, setTab] = useState<"main" | "drag">("drag");
+
+  // 대림 추가 카테고리 출근 계산 — 메인 대시보드와 동일 로직
+  const daerimExtras = useMemo(() => {
+    const presentCodes = new Set<string>();
+    for (const a of attendance) {
+      if (a.isPresent) presentCodes.add(a.empCode);
+    }
+    let sajangPresent = 0;
+    let feederPresent = 0;
+    let pojangCheolMulPresent = 0;
+    for (const e of employees) {
+      if (!e.department.includes("대림산업")) continue;
+      const isPresent = presentCodes.has(e.empCode);
+      if (!isPresent) continue;
+      const hasPCM =
+        e.category.includes("포장철물") ||
+        e.department.includes("포장철물") ||
+        e.baseLocation.includes("포장철물") ||
+        e.position.includes("포장철물");
+      if (hasPCM) {
+        pojangCheolMulPresent += 1;
+        continue;
+      }
+      if (e.category.includes("사장님")) {
+        sajangPresent += 1;
+        continue;
+      }
+      if (e.category === "피더") {
+        feederPresent += 1;
+        continue;
+      }
+    }
+    return { sajangPresent, feederPresent, pojangCheolMulPresent };
+  }, [employees, attendance]);
 
   // 기본 배치 vs 재배치 결과 → 개선 효과(델타) 계산
   const rBasic = useMemo(
@@ -157,6 +193,42 @@ export function DaerimPlanView() {
           lineWorkers={lineWorkers}
           storageKey="drag-plan-confirmed-daerim-v1"
           companyKey="대림산업"
+          feederPresentCount={daerimExtras.feederPresent}
+          computeExtraConfirmData={(m) => {
+            // 포장철물 잔업확정: 잔여부하(totalCarry) / 포장철물 출근 인원 ≥ 2시간
+            // 트리거 시 포장철물 출근자 전원 잔업 확정
+            const sajang = daerimExtras.sajangPresent;
+            const feeder = daerimExtras.feederPresent;
+            const pcm = daerimExtras.pojangCheolMulPresent;
+            const loadPerPerson = pcm > 0 ? m.totalCarry / pcm : 0;
+            const pojangCheolMulOTConfirmed =
+              loadPerPerson >= 2 - 1e-6 ? pcm : 0;
+
+            // 예상생산액 재계산 — 직접인원에 소사장/피더/포장철물 모두 포함
+            // 잔업도 직접잔업 + 피더잔업 + 포장철물잔업 합산
+            const totalDirect = m.directWorkers + sajang + feeder + pcm;
+            const totalOT =
+              m.overtimeDirect + m.overtimeFeeder + pojangCheolMulOTConfirmed;
+            const expectedProduction =
+              totalDirect * 4_200_000 + totalOT * 1_500_000;
+            const expectedWorkHours = totalDirect * 8 + totalOT * 4.5;
+            const expectedProductionPerHour =
+              expectedWorkHours > 0
+                ? Math.round(expectedProduction / expectedWorkHours)
+                : 0;
+
+            return {
+              sajangPresent: sajang,
+              pojangCheolMulPresent: pcm,
+              pojangCheolMulOTConfirmed,
+              // 기본 expectedProduction 등을 override
+              expectedProduction,
+              expectedWorkHours,
+              expectedProductionPerHour,
+              totalAttendance: totalDirect,
+              totalOT: totalOT,
+            };
+          }}
           feederGroups={[
             {
               count: 2, // 김성욱·유인섭

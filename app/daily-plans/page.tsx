@@ -27,6 +27,12 @@ interface DailyPlanDoc {
   workHours: number;
   idleHours: number;
   totalCarry: number;
+  // 대림 추가 필드
+  sajangPresent?: number;
+  pojangCheolMulPresent?: number;
+  pojangCheolMulOTConfirmed?: number;
+  totalAttendance?: number; // 합산 출근 (직접+소사장+피더+포장철물)
+  totalOT?: number; // 합산 잔업
 }
 
 function formatMoney(n: number): string {
@@ -196,43 +202,78 @@ function DailyPlansContent() {
                 <thead>
                   <tr>
                     <th>회사</th>
-                    <th>직접 인원</th>
-                    <th>피더 출근</th>
-                    <th>잔업 (직접/피더)</th>
+                    <th>직접</th>
+                    <th>소사장</th>
+                    <th>피더</th>
+                    <th>포장철물</th>
+                    <th>총 출근</th>
+                    <th>잔업 합계</th>
                     <th>총 부하</th>
                     <th>예상 근무시간</th>
                     <th>예상 생산액</th>
-                    <th>시간당 생산액</th>
+                    <th>시간당</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {rows.map((r) => (
-                    <tr key={`${r.date}_${r.company}`}>
-                      <td className="font-semibold">{r.company}</td>
-                      <td className="text-center">{r.directWorkers}명</td>
-                      <td className="text-center text-slate-500">
-                        {r.feederPresent}명
-                      </td>
-                      <td className="text-center text-rose-700">
-                        {r.overtimeDirect} / {r.overtimeFeeder}명
-                      </td>
-                      <td className="text-center">
-                        {r.totalLoad.toFixed(1)}인시
-                      </td>
-                      <td className="text-center">
-                        {r.expectedWorkHours.toFixed(0)}h
-                        <span className="text-[10px] text-slate-400 ml-1">
-                          (잔업 1.5배)
-                        </span>
-                      </td>
-                      <td className="text-right text-emerald-700 font-semibold">
-                        {formatMoney(r.expectedProduction)}
-                      </td>
-                      <td className="text-right text-indigo-700 font-semibold">
-                        {formatMoney(r.expectedProductionPerHour)}
-                      </td>
-                    </tr>
-                  ))}
+                  {rows.map((r) => {
+                    const totalAttn =
+                      r.totalAttendance ??
+                      r.directWorkers +
+                        (r.sajangPresent ?? 0) +
+                        r.feederPresent +
+                        (r.pojangCheolMulPresent ?? 0);
+                    const totalOTAll =
+                      r.totalOT ??
+                      r.overtimeDirect +
+                        r.overtimeFeeder +
+                        (r.pojangCheolMulOTConfirmed ?? 0);
+                    return (
+                      <tr key={`${r.date}_${r.company}`}>
+                        <td className="font-semibold">{r.company}</td>
+                        <td className="text-center">
+                          {r.directWorkers}
+                          <span className="text-[10px] text-rose-600 ml-1">
+                            ({r.overtimeDirect})
+                          </span>
+                        </td>
+                        <td className="text-center text-slate-500">
+                          {r.sajangPresent ?? "-"}
+                        </td>
+                        <td className="text-center text-slate-500">
+                          {r.feederPresent}
+                          <span className="text-[10px] text-rose-600 ml-1">
+                            ({r.overtimeFeeder})
+                          </span>
+                        </td>
+                        <td className="text-center text-slate-500">
+                          {r.pojangCheolMulPresent ?? "-"}
+                          {(r.pojangCheolMulOTConfirmed ?? 0) > 0 && (
+                            <span className="text-[10px] text-rose-600 ml-1">
+                              ({r.pojangCheolMulOTConfirmed})
+                            </span>
+                          )}
+                        </td>
+                        <td className="text-center font-semibold">
+                          {totalAttn}명
+                        </td>
+                        <td className="text-center text-rose-700 font-semibold">
+                          {totalOTAll}명
+                        </td>
+                        <td className="text-center">
+                          {r.totalLoad.toFixed(1)}인시
+                        </td>
+                        <td className="text-center">
+                          {r.expectedWorkHours.toFixed(0)}h
+                        </td>
+                        <td className="text-right text-emerald-700 font-semibold">
+                          {formatMoney(r.expectedProduction)}
+                        </td>
+                        <td className="text-right text-indigo-700 font-semibold">
+                          {formatMoney(r.expectedProductionPerHour)}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -245,17 +286,25 @@ function DailyPlansContent() {
         <h3 className="font-semibold text-slate-800 mb-2">계산 공식</h3>
         <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
           <li>
-            <b>예상 생산액</b> = 직접 인원 × 4,200,000원 + 잔업 직접인원 ×
+            <b>총 출근</b> (대림 기준) = 직접 + 소사장 + 피더 + 포장철물
+            (메인 대시보드 출근 인원)
+          </li>
+          <li>
+            <b>잔업 합계</b> = 직접 잔업 + 피더 잔업 + 포장철물 잔업(확정)
+          </li>
+          <li>
+            <b>포장철물 잔업확정</b>: 잔여부하(이월) / 포장철물 출근 인원
+            ≥ 2시간 → 포장철물 출근자 전원 잔업
+          </li>
+          <li>
+            <b>예상 생산액</b> = 총 출근 × 4,200,000원 + 잔업 합계 ×
             1,500,000원 (3h 잔업 기준)
           </li>
           <li>
-            <b>예상 근무시간</b> = 직접 인원 × 8h + 잔업 직접인원 × 3h × 1.5
+            <b>예상 근무시간</b> = 총 출근 × 8h + 잔업 합계 × 3h × 1.5
           </li>
           <li>
             <b>시간당 생산액</b> = 예상 생산액 ÷ 예상 근무시간
-          </li>
-          <li className="text-slate-400">
-            피더는 별도 표기 (현재 생산액 산식에 미포함)
           </li>
         </ul>
       </div>
