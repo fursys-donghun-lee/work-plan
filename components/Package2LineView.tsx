@@ -114,6 +114,29 @@ export function Package2LineView() {
     return Math.max(0, Math.min(sup, a.selectedCount));
   };
 
+  // 포장철물 출근 인원 (메인 대시보드와 동일 매칭)
+  const pojangCheolMul = useMemo(() => {
+    const presentCodes = new Set<string>();
+    for (const a of attendance) {
+      if (a.isPresent) presentCodes.add(a.empCode);
+    }
+    const present: { empCode: string; name: string }[] = [];
+    const absent: { empCode: string; name: string }[] = [];
+    for (const e of employees) {
+      if (!e.department.includes("대림산업")) continue;
+      const hasPCM =
+        e.category.includes("포장철물") ||
+        e.department.includes("포장철물") ||
+        e.baseLocation.includes("포장철물") ||
+        e.position.includes("포장철물");
+      if (!hasPCM) continue;
+      if (presentCodes.has(e.empCode))
+        present.push({ empCode: e.empCode, name: e.name });
+      else absent.push({ empCode: e.empCode, name: e.name });
+    }
+    return { present, absent };
+  }, [employees, attendance]);
+
   // 받은 지원 슬롯 목록 (각 슬롯이 어디서 왔는지 정보 포함)
   const receivedSlots: { fromGroup: string }[] = [];
   for (const a of supportAssignments) {
@@ -640,6 +663,42 @@ export function Package2LineView() {
             />
           );
         })}
+      </div>
+
+      {/* 포장철물 — 별도 카테고리 (포장2라인 그룹 아님) */}
+      <div className="card border-indigo-200 bg-indigo-50/30">
+        <div className="flex items-center justify-between mb-2">
+          <h3 className="font-semibold text-indigo-900 flex items-center gap-2">
+            <Users className="w-4 h-4" />
+            포장철물
+            <span className="text-xs font-normal text-indigo-600">
+              · 출근 {pojangCheolMul.present.length}명 / 미출근{" "}
+              {pojangCheolMul.absent.length}명
+            </span>
+          </h3>
+        </div>
+        {pojangCheolMul.present.length > 0 ? (
+          <div className="flex flex-wrap gap-1.5">
+            {pojangCheolMul.present.map((m) => (
+              <span
+                key={m.empCode}
+                className="text-xs px-2 py-1 rounded bg-white border border-indigo-200 text-slate-700"
+                title={m.empCode}
+              >
+                {m.name}
+              </span>
+            ))}
+            {pojangCheolMul.absent.length > 0 && (
+              <span className="text-xs text-slate-400 ml-2 self-center">
+                · 미출근: {pojangCheolMul.absent.map((m) => m.name).join(", ")}
+              </span>
+            )}
+          </div>
+        ) : (
+          <p className="text-xs text-slate-500">
+            출근한 포장철물 직원이 없습니다.
+          </p>
+        )}
       </div>
 
       {unassignedMembers.length > 0 && (

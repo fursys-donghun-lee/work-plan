@@ -26,7 +26,6 @@ const NAV_ITEMS_BY_COMPANY: Record<Company, { href: string; label: string }[]> =
   ],
   대림산업: [
     { href: "/", label: "메인 대시보드" },
-    { href: "/floor", label: "포장2라인 부하" },
     { href: "/plan", label: "재배치 계획" },
     { href: "/package2-line", label: "포장2라인 상세" },
   ],
