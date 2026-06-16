@@ -12,12 +12,27 @@ import {
 } from "firebase/firestore";
 import { signInAnonymously, onAuthStateChanged } from "firebase/auth";
 
-// Firestore 분리 저장:
-// - state/main: heavy data (employees, attendance, loadPlan 등) — 변경 빈도 낮음
-// - state/plan: 수동 배치 잔업 인원 (manualPlan*) — 빈번한 변경, 격리 필요
-//   (확정/임시셀 변경 시 heavy data 와 함께 쓰지 않아 1MB 한계/충돌 회피)
+// Firestore 분리 저장 (1MB 문서 한계 회피):
+// - state/main: 마스터 데이터 + 사용자 입력 + 업로드 로그 (변경 빈도 낮음)
+// - state/daily: 일일 데이터 (attendance/loadPlan/paintPlan/packageLoad/urgent)
+//   → 가장 크고 자주 갱신되는 데이터를 별도 문서로 격리
+// - state/plan: 수동 배치 잔업 인원 (manualPlan*)
 const STATE_DOC_PATH = ["state", "main"] as const;
+const DAILY_DOC_PATH = ["state", "daily"] as const;
 const PLAN_DOC_PATH = ["state", "plan"] as const;
+
+const DAILY_KEYS = [
+  "attendance",
+  "loadPlan",
+  "paintPlan",
+  "packageLoad",
+  "urgentProduction",
+  "attendanceMeta",
+  "loadPlanMeta",
+  "paintPlanMeta",
+  "packageLoadMeta",
+  "urgentProductionMeta",
+] as const;
 const PLAN_KEYS = [
   // 대림 포장2라인
   "manualPlanOvertimeBasic",
@@ -32,7 +47,10 @@ const PLAN_KEYS = [
   "dohoPlanFeederOvertimeConfirmed",
 ] as const;
 
+// state/main 에 저장 — 마스터 데이터 + 사용자 입력 + 업로드 로그
+// 일일자료(attendance/loadPlan/...) 는 state/daily 별도 문서로 분리
 const SYNCED_KEYS = [
+  // 마스터 데이터
   "employees",
   "equipment",
   "workGroups",
@@ -44,17 +62,7 @@ const SYNCED_KEYS = [
   "loadBarMeta",
   "packagePositionMeta",
   "lineBaseMeta",
-  "attendance",
-  "loadPlan",
-  "paintPlan",
-  "packageLoad",
-  "urgentProduction",
-  // workDate 는 sync 제외 — 각 PC 의 오늘 날짜로 SessionState 가 설정 (긴급건 D-1/D-2 판정)
-  "attendanceMeta",
-  "loadPlanMeta",
-  "paintPlanMeta",
-  "packageLoadMeta",
-  "urgentProductionMeta",
+  // 사용자 입력
   "supportAssignments",
   "supportRedirects",
   "packageWorkerOverrides",
@@ -64,8 +72,7 @@ const SYNCED_KEYS = [
   "package2SupportPlacements",
   "package2GroupMerges",
   "overtimeConfirmed",
-  // manualPlan* 4개는 state/plan 별도 문서로 분리 sync (PLAN_KEYS)
-  // uploadLog 는 sync 제외 — 문서 크기 1MB 초과 방지 (localStorage 만 유지)
+  "uploadLog",
 ] as const;
 
 function pickSynced(state: Record<string, unknown>): Record<string, unknown> {
@@ -112,17 +119,13 @@ function isEmptyValue(v: unknown): boolean {
 }
 
 // 업로드 자료(data) ↔ 메타(meta) 쌍. meta.uploadedAt 시각으로 newer 쪽 우선.
+// main 문서의 data+meta 쌍 (일일자료는 daily 문서로 이동)
 const META_PAIRS: { data: string; meta: string }[] = [
   { data: "employees", meta: "workStandardMeta" },
   { data: "equipment", meta: "equipmentMeta" },
   { data: "loadBar", meta: "loadBarMeta" },
   { data: "packagePosition", meta: "packagePositionMeta" },
   { data: "lineBase", meta: "lineBaseMeta" },
-  { data: "attendance", meta: "attendanceMeta" },
-  { data: "loadPlan", meta: "loadPlanMeta" },
-  { data: "paintPlan", meta: "paintPlanMeta" },
-  { data: "packageLoad", meta: "packageLoadMeta" },
-  { data: "urgentProduction", meta: "urgentProductionMeta" },
 ];
 
 // setState 에 undefined 가 들어가면 store 의 기존 값이 undefined 로 덮여 컴포넌트가
@@ -181,17 +184,7 @@ function mergePreserveLocal(
     }
   }
 
-  // 3. workDate 는 attendanceMeta 따라가기
-  {
-    const localTime = getMetaTime((local as any).attendanceMeta);
-    const remoteTime = getMetaTime((remote as any).attendanceMeta);
-    const lwd = (local as any).workDate;
-    if (localTime > remoteTime && lwd !== undefined) {
-      merged.workDate = lwd;
-    }
-  }
-
-  // 4. 그 외 필드 — 결과가 비어있고 로컬에 있으면 로컬 보존
+  // 3. 그 외 필드 — 결과가 비어있고 로컬에 있으면 로컬 보존
   for (const k of SYNCED_KEYS) {
     if (isEmptyValue(merged[k]) && !isEmptyValue((local as any)[k])) {
       merged[k] = (local as any)[k];
@@ -481,7 +474,104 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
     };
   }, [authReady]);
 
-  // 3) state/plan 별도 문서 sync — manualPlan* 4개 필드
+  // 3) state/daily 별도 문서 sync — 일일자료 (attendance/loadPlan/...)
+  // 가장 크고 자주 갱신되는 데이터를 격리해서 마스터 데이터(state/main) 보호
+  useEffect(() => {
+    if (!isFirebaseConfigured()) return;
+    if (!authReady) return;
+    const db = getDb();
+    const ref = doc(db, ...DAILY_DOC_PATH);
+
+    let dailyInitialSyncDone = false;
+    const unsub = onSnapshot(
+      ref,
+      (snap) => {
+        if (!snap.exists()) {
+          // 첫 사용자 — 현재 daily 데이터를 push
+          const local = useDataStore.getState() as unknown as Record<
+            string,
+            unknown
+          >;
+          const payload: Record<string, unknown> = {};
+          for (const k of DAILY_KEYS) payload[k] = local[k];
+          if (
+            Object.values(payload).some(
+              (v) => Array.isArray(v) && (v as unknown[]).length > 0
+            )
+          ) {
+            void setDoc(ref, {
+              ...(sanitizeForFirestore(payload) as Record<string, unknown>),
+              _updatedAt: serverTimestamp(),
+            }).catch((e) =>
+              console.warn("[SyncProvider/daily] initial push", e)
+            );
+          }
+          dailyInitialSyncDone = true;
+          return;
+        }
+        const data = snap.data() ?? {};
+        const update: Record<string, unknown> = {};
+        for (const k of DAILY_KEYS) {
+          if (k in data) update[k] = data[k];
+        }
+        useDataStore.setState(stripUndefined(update) as never, false);
+        dailyInitialSyncDone = true;
+      },
+      (err) => {
+        console.warn("[SyncProvider/daily] onSnapshot", err);
+        dailyInitialSyncDone = true;
+      }
+    );
+
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let lastWritten = "";
+    const flush = async () => {
+      const local = useDataStore.getState() as unknown as Record<
+        string,
+        unknown
+      >;
+      const payload: Record<string, unknown> = {};
+      for (const k of DAILY_KEYS) payload[k] = local[k];
+      const body = JSON.stringify(payload);
+      if (body === lastWritten) return;
+      try {
+        await setDoc(ref, {
+          ...(sanitizeForFirestore(payload) as Record<string, unknown>),
+          _updatedAt: serverTimestamp(),
+        });
+        lastWritten = body;
+      } catch (e) {
+        const code = (e as { code?: string })?.code ?? String(e);
+        const sizeKB = (body.length / 1024).toFixed(0);
+        console.warn("[SyncProvider/daily] write 실패", code, `${sizeKB}KB`);
+      }
+    };
+
+    const unsubStore = useDataStore.subscribe((curr, prev) => {
+      if (!dailyInitialSyncDone) return;
+      let changed = false;
+      for (const k of DAILY_KEYS) {
+        if (
+          (curr as unknown as Record<string, unknown>)[k] !==
+          (prev as unknown as Record<string, unknown>)[k]
+        ) {
+          changed = true;
+          break;
+        }
+      }
+      if (!changed) return;
+      if (timer) clearTimeout(timer);
+      timer = setTimeout(flush, 800);
+    });
+
+    return () => {
+      if (timer) clearTimeout(timer);
+      unsub();
+      unsubStore();
+    };
+  }, [authReady]);
+
+  // 4) state/plan 별도 문서 sync — manualPlan* 4개 필드
   // heavy data 와 격리: 임시셀 추가/확정 변경 시 큰 문서 안 건드림
   useEffect(() => {
     if (!isFirebaseConfigured()) return;
