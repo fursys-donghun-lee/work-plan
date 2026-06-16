@@ -1301,7 +1301,7 @@ export function DragPlanView({
                     }
                   >
                     <div className="truncate text-xs">
-                      {result.timelines.find((t) => t.name === line)?.urgent ? (
+                      {lineMeta[line]?.urgent ? (
                         <span
                           className="text-rose-600 font-bold"
                           title="긴급건 (D-1/D-2)"
