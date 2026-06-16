@@ -1078,11 +1078,9 @@ export function DragPlanView({
 
     // 일자별 근무계획 Firestore 저장 (관리자가 일자별로 조회 가능)
     if (companyKey && isFirebaseConfigured()) {
-      // 직접 인원 = 자동라인 제외한 lineWorkers 유니크 워커 수
+      // 직접 인원 = lineWorkers 전체 유니크 워커 (자동라인 포함, 메인 대시보드와 일치)
       const directSet = new Set<string>();
-      for (const [line, workers] of Object.entries(lineWorkers)) {
-        const isAuto = lineMeta[line]?.autoManaged ?? false;
-        if (isAuto) continue;
+      for (const workers of Object.values(lineWorkers)) {
         for (const w of workers) directSet.add(w);
       }
       const directWorkers = directSet.size;

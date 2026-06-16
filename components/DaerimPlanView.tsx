@@ -41,17 +41,19 @@ export function DaerimPlanView() {
   // - 포장철물: 포장철물 키워드 (category/department/baseLocation/position 중)
   // - 소사장: '사장님' 키워드 포함
   // - 피더: useDaerimRealloc 의 feederPresentCount (package2.groups['피더']) 사용
-  //   → employees.category === "피더" 매칭은 실데이터 카테고리와 다를 수 있어 부정확
+  // - 직접: 전체 대림 출근 - 소사장 - 피더 - 포장철물 (메인 대시보드와 합 일치)
   const daerimExtras = useMemo(() => {
     const presentCodes = new Set<string>();
     for (const a of attendance) {
       if (a.isPresent) presentCodes.add(a.empCode);
     }
+    let totalDaerimPresent = 0;
     let sajangPresent = 0;
     let pojangCheolMulPresent = 0;
     for (const e of employees) {
       if (!e.department.includes("대림산업")) continue;
       if (!presentCodes.has(e.empCode)) continue;
+      totalDaerimPresent += 1;
       const hasPCM =
         e.category.includes("포장철물") ||
         e.department.includes("포장철물") ||
@@ -66,10 +68,17 @@ export function DaerimPlanView() {
         continue;
       }
     }
+    // 직접 = 전체 - 피더 - 소사장 - 포장철물 (메인 대시보드 포장2라인 행과 동일)
+    const directWorkerCount =
+      totalDaerimPresent -
+      sajangPresent -
+      feederPresentCount -
+      pojangCheolMulPresent;
     return {
       sajangPresent,
       feederPresent: feederPresentCount,
       pojangCheolMulPresent,
+      directWorkerCount: Math.max(0, directWorkerCount),
     };
   }, [employees, attendance, feederPresentCount]);
 
@@ -198,18 +207,18 @@ export function DaerimPlanView() {
           companyKey="대림산업"
           feederPresentCount={daerimExtras.feederPresent}
           computeExtraConfirmData={(m) => {
-            // 포장철물 잔업확정: 잔여부하(totalCarry) / 포장철물 출근 인원 ≥ 2시간
-            // 트리거 시 포장철물 출근자 전원 잔업 확정
+            // 포장철물 잔업확정: 잔여부하 / 포장철물 출근 인원 ≥ 2시간
             const sajang = daerimExtras.sajangPresent;
             const feeder = daerimExtras.feederPresent;
             const pcm = daerimExtras.pojangCheolMulPresent;
+            // 직접 인원 = 메인 대시보드 포장2라인 행 (전체 - 사장님 - 피더 - 포장철물)
+            const directWorkers = daerimExtras.directWorkerCount;
             const loadPerPerson = pcm > 0 ? m.totalCarry / pcm : 0;
             const pojangCheolMulOTConfirmed =
               loadPerPerson >= 2 - 1e-6 ? pcm : 0;
 
-            // 예상생산액 재계산 — 직접인원에 소사장/피더/포장철물 모두 포함
-            // 잔업도 직접잔업 + 피더잔업 + 포장철물잔업 합산
-            const totalDirect = m.directWorkers + sajang + feeder + pcm;
+            // 예상생산액 — 총 출근 × 4.2M + 총 잔업 × 1.5M
+            const totalDirect = directWorkers + sajang + feeder + pcm;
             const totalOT =
               m.overtimeDirect + m.overtimeFeeder + pojangCheolMulOTConfirmed;
             const expectedProduction =
@@ -221,10 +230,11 @@ export function DaerimPlanView() {
                 : 0;
 
             return {
+              // direct 도 override — 메인 대시보드 기준
+              directWorkers,
               sajangPresent: sajang,
               pojangCheolMulPresent: pcm,
               pojangCheolMulOTConfirmed,
-              // 기본 expectedProduction 등을 override
               expectedProduction,
               expectedWorkHours,
               expectedProductionPerHour,
