@@ -76,6 +76,9 @@ export function CompanyMainDashboard({ company }: Props) {
   const manualPlanFeederOvertimeConfirmed = useDataStore(
     (s) => s.manualPlanFeederOvertimeConfirmed
   );
+  const manualPlanPCMOvertimeConfirmed = useDataStore(
+    (s) => s.manualPlanPCMOvertimeConfirmed
+  );
   // 수동 배치 잔업 인원 — 다호 포장1라인
   const dohoPlanOvertimeConfirmed = useDataStore(
     (s) => s.dohoPlanOvertimeConfirmed
@@ -439,14 +442,11 @@ export function CompanyMainDashboard({ company }: Props) {
 
     // 대림산업
     if (company === "대림산업") {
-      // 포장철물 인원: 포장2라인 잔업필요 > 10 시 출근자 전체 잔업
+      // 포장철물 잔업필요 = 포장2라인 직접 잔업확정 ≥ 1명 → 포장철물 전원 잔업
+      // (manualPlanPCMOvertimeConfirmed 와 동일 트리거)
       if (category.includes("포장철물")) {
-        const triggered = package2Overtime > 10;
-        const present = triggered
-          ? presentCountForKeyword("포장철물", "대림산업")
-          : 0;
         return {
-          overtime: present,
+          overtime: manualPlanPCMOvertimeConfirmed,
           supportable: 0,
           sent: 0,
           received: 0,
@@ -518,6 +518,8 @@ export function CompanyMainDashboard({ company }: Props) {
     let overtimeConfirmedCount: number;
     if (company === "대림산업" && s.category === "포장2라인") {
       overtimeConfirmedCount = manualPlanOvertimeConfirmed;
+    } else if (company === "대림산업" && s.category === "포장철물") {
+      overtimeConfirmedCount = manualPlanPCMOvertimeConfirmed;
     } else if (company === "다호산업" && s.category === "포장1라인") {
       overtimeConfirmedCount = dohoPlanOvertimeConfirmed;
     } else {

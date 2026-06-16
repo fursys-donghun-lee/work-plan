@@ -24,6 +24,7 @@ const PLAN_KEYS = [
   "manualPlanOvertimeConfirmed",
   "manualPlanFeederOvertimeBasic",
   "manualPlanFeederOvertimeConfirmed",
+  "manualPlanPCMOvertimeConfirmed",
   // 다호 포장1라인
   "dohoPlanOvertimeBasic",
   "dohoPlanOvertimeConfirmed",

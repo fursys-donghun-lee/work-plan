@@ -28,6 +28,9 @@ export function DaerimPlanView() {
   const workDate = useDataStore((s) => s.workDate);
   const employees = useDataStore((s) => s.employees);
   const attendance = useDataStore((s) => s.attendance);
+  const setManualPlanPCMOvertimeConfirmed = useDataStore(
+    (s) => s.setManualPlanPCMOvertimeConfirmed
+  );
   const { groups, extraFree, missing, lineWorkers, feederPresentCount } =
     useDaerimRealloc();
   // 이동 override (간트 라벨 클릭으로 누가 갈지 지정)
@@ -218,6 +221,8 @@ export function DaerimPlanView() {
             const pcm = daerimExtras.pojangCheolMulPresent;
             const directWorkers = daerimExtras.directWorkerCount;
             const pojangCheolMulOTConfirmed = m.overtimeDirect >= 1 ? pcm : 0;
+            // 메인 대시보드 표시용 store 에 push
+            setManualPlanPCMOvertimeConfirmed(pojangCheolMulOTConfirmed);
 
             // 예상생산액 — 총 출근 × 4.2M + 총 잔업 × 1.5M
             const totalDirect = directWorkers + sajang + feeder + pcm;

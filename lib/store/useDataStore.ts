@@ -85,6 +85,8 @@ interface DataState {
   manualPlanOvertimeConfirmed: number;
   manualPlanFeederOvertimeBasic: number;
   manualPlanFeederOvertimeConfirmed: number;
+  // 수동 배치 (대림 포장2라인) — 포장철물 잔업확정 (메인 대시보드 표시)
+  manualPlanPCMOvertimeConfirmed: number;
   // 수동 배치 (다호 포장1라인 /plan 페이지) 산출 잔업 인원
   dohoPlanOvertimeBasic: number;
   dohoPlanOvertimeConfirmed: number;
@@ -154,6 +156,7 @@ interface DataState {
     feederBasic: number,
     feederConfirmed: number
   ) => void;
+  setManualPlanPCMOvertimeConfirmed: (count: number) => void;
   setDohoPlanOvertime: (
     basic: number,
     confirmed: number,
@@ -219,6 +222,7 @@ export const useDataStore = create<DataState>()(
       manualPlanOvertimeConfirmed: 0,
       manualPlanFeederOvertimeBasic: 0,
       manualPlanFeederOvertimeConfirmed: 0,
+      manualPlanPCMOvertimeConfirmed: 0,
       dohoPlanOvertimeBasic: 0,
       dohoPlanOvertimeConfirmed: 0,
       dohoPlanFeederOvertimeBasic: 0,
@@ -462,6 +466,8 @@ export const useDataStore = create<DataState>()(
           manualPlanFeederOvertimeBasic: feederBasic,
           manualPlanFeederOvertimeConfirmed: feederConfirmed,
         }),
+      setManualPlanPCMOvertimeConfirmed: (count) =>
+        set({ manualPlanPCMOvertimeConfirmed: count }),
       setDohoPlanOvertime: (basic, confirmed, feederBasic, feederConfirmed) =>
         set({
           dohoPlanOvertimeBasic: basic,
