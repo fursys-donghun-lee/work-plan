@@ -156,6 +156,7 @@ export function DaerimPlanView() {
           rBasic={rBasic}
           lineWorkers={lineWorkers}
           storageKey="drag-plan-confirmed-daerim-v1"
+          companyKey="대림산업"
           feederGroups={[
             {
               count: 2, // 김성욱·유인섭

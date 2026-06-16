@@ -20,6 +20,8 @@ type ManualTempCell = {
 import { RealMetricsPanel } from "@/components/RealMetricsPanel";
 import { ImprovementSummary } from "@/components/ImprovementSummary";
 import { useDataStore } from "@/lib/store/useDataStore";
+import { getDb, isFirebaseConfigured } from "@/lib/firebase";
+import { doc, setDoc, serverTimestamp } from "firebase/firestore";
 
 // 피더 잔업 트리거 그룹
 export interface FeederGroupConfig {
@@ -40,6 +42,8 @@ interface Props {
     feederBasic: number,
     feederConfirmed: number
   ) => void; // 메인 대시보드 전파용 (회사별 store 필드)
+  companyKey?: string; // 일자별 근무계획 저장용 (Firestore dailyPlans 키)
+  feederPresentCount?: number; // 피더 출근 인원 (선택)
 }
 
 // 11 시간 슬롯 (work-time 0..10)
@@ -61,6 +65,8 @@ export function DragPlanView({
   feederGroups,
   storageKey,
   setOvertimeFn,
+  companyKey,
+  feederPresentCount = 0,
 }: Props) {
   // assignments[workerName] = [line at hour 0, ..., hour HOUR_COUNT-1]
   const initialAssignments = useMemo(() => {
@@ -1057,6 +1063,63 @@ export function DragPlanView({
         STORAGE_KEY,
         JSON.stringify({ assignments: snap, expiresAt: end.getTime() })
       );
+    }
+
+    // 일자별 근무계획 Firestore 저장 (관리자가 일자별로 조회 가능)
+    if (companyKey && isFirebaseConfigured()) {
+      // 직접 인원 = 자동라인 제외한 lineWorkers 유니크 워커 수
+      const directSet = new Set<string>();
+      for (const [line, workers] of Object.entries(lineWorkers)) {
+        const isAuto = lineMeta[line]?.autoManaged ?? false;
+        if (isAuto) continue;
+        for (const w of workers) directSet.add(w);
+      }
+      const directWorkers = directSet.size;
+
+      // 확정 스냅샷 기준 잔업인원 (직접만, 피더는 별도)
+      const confirmedSynthLocal = synthesizeResult(snap);
+      const overtimeDirect = confirmedSynthLocal.result.overtimePeople;
+      const overtimeFeeder = confirmedSynthLocal.feederOvertime;
+
+      // 예상생산액 — 직접인원 × 4,200,000 + 잔업하는 직접인원 × 1,500,000
+      const PROD_PER_WORKER_8H = 4_200_000;
+      const PROD_OT_PER_PERSON = 1_500_000;
+      const expectedProduction =
+        directWorkers * PROD_PER_WORKER_8H +
+        overtimeDirect * PROD_OT_PER_PERSON;
+
+      // 예상 근무시간 = 직접인원 × 8h + 잔업하는 직접인원 × 3h × 1.5
+      const expectedWorkHours =
+        directWorkers * 8 + overtimeDirect * 3 * 1.5;
+      const expectedProductionPerHour =
+        expectedWorkHours > 0
+          ? Math.round(expectedProduction / expectedWorkHours)
+          : 0;
+
+      // 오늘 날짜 (PC 기준)
+      const d = new Date();
+      const dateStr = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const docId = `${dateStr}_${companyKey}`;
+      try {
+        void setDoc(doc(getDb(), "dailyPlans", docId), {
+          date: dateStr,
+          company: companyKey,
+          confirmedAt: serverTimestamp(),
+          directWorkers,
+          feederPresent: feederPresentCount,
+          overtimeDirect,
+          overtimeFeeder,
+          expectedProduction,
+          expectedWorkHours,
+          expectedProductionPerHour,
+          totalLoad: confirmedSynthLocal.result.totalLoad,
+          workHours: confirmedSynthLocal.result.workHours,
+          idleHours: confirmedSynthLocal.result.idleHours,
+          totalCarry: confirmedSynthLocal.result.totalCarry,
+        });
+      } catch (e) {
+        console.warn("[DragPlanView] dailyPlan write 실패", e);
+      }
     }
   };
 

@@ -9,7 +9,10 @@ import { Home } from "lucide-react";
 import { useHydrated } from "./useComputed";
 
 const NAV_ITEMS_BY_COMPANY: Record<Company, { href: string; label: string }[]> = {
-  전체: [{ href: "/", label: "안성공장 통합 대시보드" }],
+  전체: [
+    { href: "/", label: "안성공장 통합 대시보드" },
+    { href: "/daily-plans", label: "일자별 근무계획" },
+  ],
   우성산업: [
     { href: "/", label: "메인 대시보드" },
     { href: "/workgroups", label: "그룹별 부하" },

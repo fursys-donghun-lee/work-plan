@@ -63,8 +63,8 @@ export function DohoPackage1PlanView() {
         rBasic={rBasic}
         lineWorkers={lineWorkers}
         storageKey="drag-plan-confirmed-doho-v1"
+        companyKey="다호산업"
         setOvertimeFn={setDohoPlanOvertime}
-        // 다호 피더 트리거 규칙은 추후 사용자가 명시 — 일단 비활성
         feederGroups={[]}
       />
     </div>
