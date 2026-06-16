@@ -937,10 +937,18 @@ export function DragPlanView({
     setTempCells([]);
   };
 
+  // 자동 배치 이동 로그 (어떤 워커가 언제 어디로 갔는지)
+  type AutoMoveLog = {
+    time: number; // wt
+    worker: string;
+    from: string;
+    to: string;
+  };
+  const [autoMoveLog, setAutoMoveLog] = useState<AutoMoveLog[] | null>(null);
+
   // 자동 배치 — 재배치 알고리즘(result.moves) 결과를 워커별·시간별 배치로 변환
   const handleAutoPlace = () => {
     if (readOnly) return;
-    // 1. 워커별 시작 라인 (출근 위치)
     const auto: Record<string, string[]> = {};
     const currentByLine: Record<string, string[]> = {};
     for (const [line, workers] of Object.entries(lineWorkers)) {
@@ -949,10 +957,10 @@ export function DragPlanView({
         auto[w] = Array(HOUR_COUNT).fill(line);
       }
     }
-    // 2. 시간 순으로 moves 적용
     const sorted = [...result.moves].sort(
       (a, b) => a.time - b.time || a.from.localeCompare(b.from)
     );
+    const log: AutoMoveLog[] = [];
     for (const m of sorted) {
       const startHour = Math.floor(m.time);
       for (let i = 0; i < m.count; i++) {
@@ -961,16 +969,17 @@ export function DragPlanView({
         if (!worker) continue;
         if (!currentByLine[m.to]) currentByLine[m.to] = [];
         currentByLine[m.to].push(worker);
-        // 워커 배치 갱신 — startHour 부터 끝까지 새 라인
         if (!auto[worker]) auto[worker] = Array(HOUR_COUNT).fill("");
         for (let h = startHour; h < HOUR_COUNT; h++) {
           auto[worker][h] = m.to;
         }
+        log.push({ time: m.time, worker, from: m.from, to: m.to });
       }
     }
     setAssignments(auto);
-    setStickyPriorities({}); // 정렬 새로고침
+    setStickyPriorities({});
     setTempCells([]);
+    setAutoMoveLog(log);
   };
 
   // 확정 토글 — 잠금이 풀려있으면 현재 assignments 를 스냅샷+잠금, 잠금이면 해제
@@ -1560,6 +1569,73 @@ export function DragPlanView({
         <span>· 라인 라벨 클릭해서 임시셀 구성</span>
       </div>
     </div>
+    {/* 자동 배치 이동 로그 */}
+    {autoMoveLog && autoMoveLog.length > 0 && (
+      <div className="card border-indigo-200 bg-indigo-50/40">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold text-slate-900">
+            ✨ 자동 배치 이동 내역
+            <span className="ml-2 text-xs font-normal text-slate-500">
+              총 {autoMoveLog.length}명 이동
+            </span>
+          </h2>
+          <button
+            type="button"
+            onClick={() => setAutoMoveLog(null)}
+            className="text-xs text-slate-500 hover:text-slate-800"
+          >
+            닫기
+          </button>
+        </div>
+        {(() => {
+          const byTime = new Map<number, AutoMoveLog[]>();
+          for (const m of autoMoveLog) {
+            const arr = byTime.get(m.time) ?? [];
+            arr.push(m);
+            byTime.set(m.time, arr);
+          }
+          const times = Array.from(byTime.keys()).sort((a, b) => a - b);
+          return (
+            <div className="space-y-2">
+              {times.map((t) => {
+                const items = byTime.get(t)!;
+                const wallStart = workTimeToWall(t);
+                return (
+                  <div
+                    key={t}
+                    className="border border-indigo-200 rounded p-2 bg-white"
+                  >
+                    <div className="text-xs font-bold text-indigo-800 mb-1">
+                      {formatHM(wallStart)} · {items.length}명 이동
+                    </div>
+                    <div className="flex flex-wrap gap-1.5">
+                      {items.map((m, idx) => (
+                        <div
+                          key={`${t}-${idx}`}
+                          className="text-xs px-2 py-1 rounded bg-slate-50 border border-slate-200"
+                        >
+                          <span className="font-semibold text-slate-700">
+                            {m.worker}
+                          </span>
+                          <span className="text-slate-500 mx-1">·</span>
+                          <span className="text-slate-600">
+                            {displayName(m.from)}
+                          </span>
+                          <span className="text-indigo-500 mx-1">→</span>
+                          <span className="font-semibold text-indigo-700">
+                            {displayName(m.to)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          );
+        })()}
+      </div>
+    )}
     {/* 임시셀 구성 모달 */}
     {tempCellModalLine && (
       <TempCellModal

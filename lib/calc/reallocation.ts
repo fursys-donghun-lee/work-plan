@@ -175,7 +175,8 @@ export function computeReallocation(
   startTime = 8.5,
   standardHours = 8,
   extraFree: ReallocExtraFree[] = [],
-  disableRealloc = false // true 면 기본 배치(이동 없음)로 계산
+  disableRealloc = false, // true 면 기본 배치(이동 없음)로 계산
+  disableAuxLines = false // true 면 '{부모} 보조' 라인 생성 안 함
 ): ReallocResult {
   const standardEnd = startTime + standardHours;
   const STEP = 1; // 1시간 단위 시뮬레이션 (인원 이동도 1시간 단위)
@@ -496,7 +497,7 @@ export function computeReallocation(
 
     // 1.5) 보조 라인 생성 — 정규시간 내 남는 인원(≥2명)이 있고 정규시간 안에 못 끝낼
     //      부하 무거운 짝 라인이 있으면, 보조 라인을 만들어 부하 일부를 병행 처리
-    if (time < standardEnd - EPS && freePool.length >= 2) {
+    if (!disableAuxLines && time < standardEnd - EPS && freePool.length >= 2) {
       let spawned = 0;
       while (freePool.length >= 2 && spawned < 5) {
         const remTime = standardEnd - time;

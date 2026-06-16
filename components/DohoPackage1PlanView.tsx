@@ -17,11 +17,11 @@ export function DohoPackage1PlanView() {
   const { groups, extraFree, missing, lineWorkers } = useDohoPackage1Realloc();
 
   const rBasic = useMemo(
-    () => computeReallocation(groups, 0, 8, extraFree, true),
+    () => computeReallocation(groups, 0, 8, extraFree, true, true),
     [groups, extraFree]
   );
   const rReal = useMemo(
-    () => computeReallocation(groups, 0, 8, extraFree, false),
+    () => computeReallocation(groups, 0, 8, extraFree, false, true),
     [groups, extraFree]
   );
 

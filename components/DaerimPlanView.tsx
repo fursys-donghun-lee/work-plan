@@ -36,11 +36,11 @@ export function DaerimPlanView() {
 
   // 기본 배치 vs 재배치 결과 → 개선 효과(델타) 계산
   const rBasic = useMemo(
-    () => computeReallocation(groups, 0, 8, extraFree, true),
+    () => computeReallocation(groups, 0, 8, extraFree, true, true),
     [groups, extraFree]
   );
   const rReal = useMemo(
-    () => computeReallocation(groups, 0, 8, extraFree, false),
+    () => computeReallocation(groups, 0, 8, extraFree, false, true),
     [groups, extraFree]
   );
 
