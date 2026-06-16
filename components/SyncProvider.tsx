@@ -119,13 +119,22 @@ function isEmptyValue(v: unknown): boolean {
 }
 
 // 업로드 자료(data) ↔ 메타(meta) 쌍. meta.uploadedAt 시각으로 newer 쪽 우선.
-// main 문서의 data+meta 쌍 (일일자료는 daily 문서로 이동)
+// main 문서의 data+meta 쌍
 const META_PAIRS: { data: string; meta: string }[] = [
   { data: "employees", meta: "workStandardMeta" },
   { data: "equipment", meta: "equipmentMeta" },
   { data: "loadBar", meta: "loadBarMeta" },
   { data: "packagePosition", meta: "packagePositionMeta" },
   { data: "lineBase", meta: "lineBaseMeta" },
+];
+
+// daily 문서의 data+meta 쌍
+const DAILY_META_PAIRS: { data: string; meta: string }[] = [
+  { data: "attendance", meta: "attendanceMeta" },
+  { data: "loadPlan", meta: "loadPlanMeta" },
+  { data: "paintPlan", meta: "paintPlanMeta" },
+  { data: "packageLoad", meta: "packageLoadMeta" },
+  { data: "urgentProduction", meta: "urgentProductionMeta" },
 ];
 
 // setState 에 undefined 가 들어가면 store 의 기존 값이 undefined 로 덮여 컴포넌트가
@@ -303,14 +312,43 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        // 초기 동기화: 원격을 source of truth 로 신뢰 (로컬 stale 데이터 보존 안 함)
-        // → 다중 PC 에서 같은 데이터 보장
-        // → 원격이 비어있는 첫 사용자 케이스는 위 !snap.exists() 분기에서 처리
+        // 원격 데이터를 기본으로 적용하되, 로컬의 더 최신 업로드는 보존
+        // (data+meta 쌍의 meta.uploadedAt 시각 비교)
+        const localState = useDataStore.getState() as unknown as Record<
+          string,
+          unknown
+        >;
+        const toApply: Record<string, unknown> = { ...synced };
+        let localNewer = false;
+        for (const { data, meta } of META_PAIRS) {
+          const localMetaTime = getMetaTime(localState[meta]);
+          const remoteMetaTime = getMetaTime(toApply[meta]);
+          if (localMetaTime > remoteMetaTime) {
+            // 로컬 업로드가 더 최신 → 덮어쓰지 말고 로컬 보존
+            if (localState[data] !== undefined)
+              toApply[data] = localState[data];
+            if (localState[meta] !== undefined)
+              toApply[meta] = localState[meta];
+            localNewer = true;
+          }
+        }
+
         ignoreNextRemoteRef.current = true;
-        useDataStore.setState(stripUndefined(synced) as never, false);
-        lastWriteRef.current = remoteBody;
+        useDataStore.setState(stripUndefined(toApply) as never, false);
+        lastWriteRef.current = JSON.stringify(toApply);
         initialSyncDoneRef.current = true;
         setHydrated(true);
+
+        // 로컬이 더 최신이면 Firestore 에 그 값을 다시 푸시
+        // (이전 write 가 실패했거나 우리 변경이 아직 안 전파된 경우 복구)
+        if (localNewer) {
+          void setDoc(ref, {
+            ...(sanitizeForFirestore(toApply) as Record<string, unknown>),
+            _updatedAt: serverTimestamp(),
+          }).catch((e) =>
+            console.warn("[SyncProvider] preserve-local push", e)
+          );
+        }
       },
       (err) => {
         console.warn("[SyncProvider] onSnapshot 에러", err);
@@ -526,8 +564,33 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         for (const k of DAILY_KEYS) {
           if (k in data) update[k] = data[k];
         }
+        // 로컬 업로드가 더 최신이면 보존 (meta.uploadedAt 비교)
+        const local = useDataStore.getState() as unknown as Record<
+          string,
+          unknown
+        >;
+        let localNewer = false;
+        for (const { data: d, meta } of DAILY_META_PAIRS) {
+          const localMetaTime = getMetaTime(local[meta]);
+          const remoteMetaTime = getMetaTime(update[meta]);
+          if (localMetaTime > remoteMetaTime) {
+            if (local[d] !== undefined) update[d] = local[d];
+            if (local[meta] !== undefined) update[meta] = local[meta];
+            localNewer = true;
+          }
+        }
         useDataStore.setState(stripUndefined(update) as never, false);
         dailyInitialSyncDone = true;
+
+        // 로컬이 더 최신이면 Firestore 에 푸시 (이전 write 실패 회복용)
+        if (localNewer) {
+          void setDoc(ref, {
+            ...(sanitizeForFirestore(update) as Record<string, unknown>),
+            _updatedAt: serverTimestamp(),
+          }).catch((e) =>
+            console.warn("[SyncProvider/daily] preserve-local push", e)
+          );
+        }
       },
       (err) => {
         console.warn("[SyncProvider/daily] onSnapshot", err);
