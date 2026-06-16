@@ -937,6 +937,42 @@ export function DragPlanView({
     setTempCells([]);
   };
 
+  // 자동 배치 — 재배치 알고리즘(result.moves) 결과를 워커별·시간별 배치로 변환
+  const handleAutoPlace = () => {
+    if (readOnly) return;
+    // 1. 워커별 시작 라인 (출근 위치)
+    const auto: Record<string, string[]> = {};
+    const currentByLine: Record<string, string[]> = {};
+    for (const [line, workers] of Object.entries(lineWorkers)) {
+      currentByLine[line] = [...workers];
+      for (const w of workers) {
+        auto[w] = Array(HOUR_COUNT).fill(line);
+      }
+    }
+    // 2. 시간 순으로 moves 적용
+    const sorted = [...result.moves].sort(
+      (a, b) => a.time - b.time || a.from.localeCompare(b.from)
+    );
+    for (const m of sorted) {
+      const startHour = Math.floor(m.time);
+      for (let i = 0; i < m.count; i++) {
+        const fromList = currentByLine[m.from] ?? [];
+        const worker = fromList.shift();
+        if (!worker) continue;
+        if (!currentByLine[m.to]) currentByLine[m.to] = [];
+        currentByLine[m.to].push(worker);
+        // 워커 배치 갱신 — startHour 부터 끝까지 새 라인
+        if (!auto[worker]) auto[worker] = Array(HOUR_COUNT).fill("");
+        for (let h = startHour; h < HOUR_COUNT; h++) {
+          auto[worker][h] = m.to;
+        }
+      }
+    }
+    setAssignments(auto);
+    setStickyPriorities({}); // 정렬 새로고침
+    setTempCells([]);
+  };
+
   // 확정 토글 — 잠금이 풀려있으면 현재 assignments 를 스냅샷+잠금, 잠금이면 해제
   // 확정시 localStorage 에 저장 (그날 24:00 만료)
   const handleConfirmToggle = () => {
@@ -1026,6 +1062,15 @@ export function DragPlanView({
           </span>
         </h2>
         <div className="flex items-center gap-2">
+          <button
+            type="button"
+            onClick={handleAutoPlace}
+            disabled={readOnly}
+            className="text-xs px-3 py-1.5 bg-indigo-600 hover:bg-indigo-700 text-white font-semibold rounded disabled:opacity-40 disabled:cursor-not-allowed"
+            title="재배치 알고리즘 결과대로 워커 자동 배치"
+          >
+            ✨ 자동 배치
+          </button>
           <button
             type="button"
             onClick={handleReset}
