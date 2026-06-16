@@ -112,10 +112,10 @@ export function DaerimPlanView() {
           </p>
         </div>
         <Link
-          href="/floor"
+          href="/package2-line"
           className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
         >
-          현장 화면으로
+          상세 내역 보기
         </Link>
       </div>
 
