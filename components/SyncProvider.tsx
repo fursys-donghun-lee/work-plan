@@ -214,8 +214,9 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   const ignoreNextRemoteRef = useRef<boolean>(false);
   const localPendingRef = useRef<boolean>(false);
   // 초기 snapshot 수신 전에는 local 변경 → Firestore 쓰기 차단
-  // (각 PC localStorage hydration 으로 stale 데이터가 Firestore 덮어쓰는 것 방지)
   const initialSyncDoneRef = useRef<boolean>(false);
+  // 연속 실패 카운터 — 3회 이상 연속 실패할 때만 badge 표시
+  const consecutiveFailsRef = useRef<number>(0);
 
   // 0) 익명 인증 — Firestore 규칙(request.auth != null) 통과용
   useEffect(() => {
@@ -394,6 +395,7 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
         if (mergedBody === remoteBody) {
           lastWriteRef.current = mergedBody;
           localPendingRef.current = false;
+          consecutiveFailsRef.current = 0;
           setStatus({ kind: "ok" });
           return;
         }
@@ -404,38 +406,48 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           _updatedAt: serverTimestamp(),
         });
         lastWriteRef.current = mergedBody;
+        consecutiveFailsRef.current = 0;
         setStatus({ kind: "ok" });
       } catch (e) {
         const code = (e as { code?: string })?.code ?? String(e);
-        console.error("[SyncProvider] write 실패", e);
-        // 문서 크기 정보 (디버깅용) — 로컬 state 기준 추정
         const sizeKB = (localBody.length / 1024).toFixed(0);
+        console.warn(
+          "[SyncProvider] write 실패",
+          code,
+          `${sizeKB}KB`,
+          e
+        );
         const isPersistent =
           code === "permission-denied" ||
           code.includes("resource-exhausted") ||
           code === "auth/operation-not-allowed";
-        setStatus({
-          kind: "write-failed",
-          reason:
-            code === "permission-denied"
-              ? "Firestore 권한 오류 — 보안 규칙 확인 필요"
-              : code.includes("resource-exhausted")
-                ? `문서 크기 ${sizeKB}KB — 1MB 초과 위험 (오래된 업로드 로그 정리 필요)`
-                : `${code} (size ${sizeKB}KB)`,
-        });
-        // 영구 에러(권한/용량/인증)면 재시도 안 함 — 무한 루프 방지
-        // 일시적 에러만 5초 후 한 번 재시도, 그 후 10초 뒤 상태 자동 정리
+        consecutiveFailsRef.current += 1;
+        // 영구 에러는 즉시 badge, 일시 에러는 3회 연속 실패해야 badge 표시
+        const shouldShowBadge =
+          isPersistent || consecutiveFailsRef.current >= 3;
+        if (shouldShowBadge) {
+          setStatus({
+            kind: "write-failed",
+            reason:
+              code === "permission-denied"
+                ? "Firestore 권한 오류 — 보안 규칙 확인 필요"
+                : code.includes("resource-exhausted")
+                  ? `문서 크기 ${sizeKB}KB — 1MB 초과 (자료 정리 필요)`
+                  : `${code} (size ${sizeKB}KB, ${consecutiveFailsRef.current}회 연속)`,
+          });
+          // 5초 후 자동 클리어 (영구 에러도 일단 사라지게)
+          setTimeout(() => {
+            setStatus((s) =>
+              s.kind === "write-failed" ? { kind: "ok" } : s
+            );
+          }, 5000);
+        }
+        // 영구 에러면 재시도 안 함; 일시 에러는 5초 후 재시도
         if (!isPersistent) {
           setTimeout(() => {
             if (!inflight) flush();
           }, 5000);
         }
-        // 15초 후 상태 자동 클리어 — 빨간 박스 영구 노출 방지
-        setTimeout(() => {
-          setStatus((s) =>
-            s.kind === "write-failed" ? { kind: "ok" } : s
-          );
-        }, 15000);
         localPendingRef.current = false;
       } finally {
         inflight = false;
