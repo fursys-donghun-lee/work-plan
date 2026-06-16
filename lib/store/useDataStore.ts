@@ -114,6 +114,7 @@ interface DataState {
   addLineBase: (item: LineBaseHeadcount) => void;
   deleteLineBase: (index: number) => void;
   setAttendance: (data: AttendanceRecord[], workDate: string, meta: UploadMeta) => void;
+  setWorkDate: (workDate: string) => void;
   setLoadPlan: (data: LoadPlanRow[], meta: UploadMeta) => void;
   setPaintPlan: (data: PaintPlanRow[], meta: UploadMeta) => void;
   setPackageLoad: (data: PackageLoadRow[], meta: UploadMeta) => void;
@@ -271,8 +272,10 @@ export const useDataStore = create<DataState>()(
         set((state) => ({
           lineBase: state.lineBase.filter((_, i) => i !== index),
         })),
-      setAttendance: (data, workDate, meta) =>
-        set({ attendance: data, workDate, attendanceMeta: meta }),
+      // setAttendance: 파일의 workDate 는 무시 (오늘 날짜는 SessionState 가 관리)
+      setAttendance: (data, _workDate, meta) =>
+        set({ attendance: data, attendanceMeta: meta }),
+      setWorkDate: (workDate) => set({ workDate }),
       setLoadPlan: (data, meta) => set({ loadPlan: data, loadPlanMeta: meta }),
       setPaintPlan: (data, meta) => set({ paintPlan: data, paintPlanMeta: meta }),
       setPackageLoad: (data, meta) => set({ packageLoad: data, packageLoadMeta: meta }),

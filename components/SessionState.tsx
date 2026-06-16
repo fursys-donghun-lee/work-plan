@@ -11,6 +11,15 @@ const ADMIN_KEY = "fursys-admin";
 const CHOSEN_KEY = "fursys-chosen";
 const COMPANY_KEY = "fursys-company";
 
+// YYYY-MM-DD 형식 오늘 날짜
+function todayYYYYMMDD(): string {
+  const d = new Date();
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, "0");
+  const day = String(d.getDate()).padStart(2, "0");
+  return `${y}-${m}-${day}`;
+}
+
 export function SessionState() {
   const isAdmin = useDataStore((s) => s.isAdmin);
   const companyChosen = useDataStore((s) => s.companyChosen);
@@ -19,8 +28,9 @@ export function SessionState() {
   const setCompanyChosen = useDataStore((s) => s.setCompanyChosen);
   const setSelectedCompany = useDataStore((s) => s.setSelectedCompany);
   const setSessionReady = useDataStore((s) => s.setSessionReady);
+  const setWorkDate = useDataStore((s) => s.setWorkDate);
 
-  // 마운트 시 sessionStorage 복원
+  // 마운트 시 sessionStorage 복원 + workDate 를 오늘 날짜로 설정
   useEffect(() => {
     try {
       if (sessionStorage.getItem(ADMIN_KEY) === "1") setIsAdmin(true);
@@ -28,6 +38,8 @@ export function SessionState() {
       if (company) setSelectedCompany(company as Company);
       if (sessionStorage.getItem(CHOSEN_KEY) === "1") setCompanyChosen(true);
     } catch {}
+    // workDate 는 항상 PC 의 오늘 날짜 기준 (긴급건 D-1/D-2 판정용)
+    setWorkDate(todayYYYYMMDD());
     setSessionReady(true);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
