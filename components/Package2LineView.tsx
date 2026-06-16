@@ -672,42 +672,11 @@ export function Package2LineView() {
             />
           );
         })}
-      </div>
-
-      {/* 포장철물 — 별도 카테고리 (포장2라인 그룹 아님) */}
-      <div className="card border-indigo-200 bg-indigo-50/30">
-        <div className="flex items-center justify-between mb-2">
-          <h3 className="font-semibold text-indigo-900 flex items-center gap-2">
-            <Users className="w-4 h-4" />
-            포장철물
-            <span className="text-xs font-normal text-indigo-600">
-              · 출근 {pojangCheolMul.present.length}명 / 미출근{" "}
-              {pojangCheolMul.absent.length}명
-            </span>
-          </h3>
-        </div>
-        {pojangCheolMul.present.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
-            {pojangCheolMul.present.map((m) => (
-              <span
-                key={m.empCode}
-                className="text-xs px-2 py-1 rounded bg-white border border-indigo-200 text-slate-700"
-                title={m.empCode}
-              >
-                {m.name}
-              </span>
-            ))}
-            {pojangCheolMul.absent.length > 0 && (
-              <span className="text-xs text-slate-400 ml-2 self-center">
-                · 미출근: {pojangCheolMul.absent.map((m) => m.name).join(", ")}
-              </span>
-            )}
-          </div>
-        ) : (
-          <p className="text-xs text-slate-500">
-            출근한 포장철물 직원이 없습니다.
-          </p>
-        )}
+        {/* 포장철물 — 별도 카테고리 그룹처럼 카드 표시 */}
+        <PojangCheolMulCard
+          present={pojangCheolMul.present}
+          absent={pojangCheolMul.absent}
+        />
       </div>
 
       {unassignedMembers.length > 0 && (
@@ -771,6 +740,66 @@ function SummaryStat({
         </div>
         <div className="text-lg font-bold leading-tight">{value}</div>
       </div>
+    </div>
+  );
+}
+
+// 포장철물 카드 — 그룹 카드와 비슷한 스타일, 부하는 메인 대시보드 트리거 기준
+function PojangCheolMulCard({
+  present,
+  absent,
+}: {
+  present: { empCode: string; name: string }[];
+  absent: { empCode: string; name: string }[];
+}) {
+  const total = present.length + absent.length;
+  return (
+    <div className="card border-indigo-200 bg-indigo-50/40">
+      <div className="flex items-start justify-between mb-2">
+        <h3 className="font-bold text-slate-900">포장철물</h3>
+        <span className="badge bg-indigo-100 text-indigo-800 border-indigo-300">
+          간접
+        </span>
+      </div>
+
+      <div className="grid grid-cols-2 gap-x-2 gap-y-0.5 text-xs mb-3">
+        <span className="text-slate-500">출근/기준</span>
+        <span className="text-right font-medium">
+          {present.length} / {total}
+        </span>
+        <span className="text-slate-500">미출근</span>
+        <span className="text-right font-medium text-rose-700">
+          {absent.length}명
+        </span>
+      </div>
+
+      {present.length > 0 ? (
+        <div>
+          <div className="text-[11px] text-slate-500 mb-1">출근자</div>
+          <div className="flex flex-wrap gap-1">
+            {present.map((m) => (
+              <span
+                key={m.empCode}
+                className="text-xs px-2 py-1 rounded bg-white border border-indigo-200 text-slate-700"
+                title={m.empCode}
+              >
+                {m.name}
+              </span>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <p className="text-xs text-slate-500">출근한 포장철물 직원 없음</p>
+      )}
+
+      {absent.length > 0 && (
+        <div className="mt-2">
+          <div className="text-[11px] text-slate-500 mb-1">미출근</div>
+          <div className="text-xs text-slate-400">
+            {absent.map((m) => m.name).join(", ")}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
