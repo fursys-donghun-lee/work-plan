@@ -1301,9 +1301,16 @@ export function DragPlanView({
                     }
                   >
                     <div className="truncate text-xs">
-                      {result.timelines.find((t) => t.name === line)?.urgent &&
-                        "● "}
-                      {displayName(line)}
+                      {result.timelines.find((t) => t.name === line)?.urgent ? (
+                        <span
+                          className="text-rose-600 font-bold"
+                          title="긴급건 (D-1/D-2)"
+                        >
+                          ● {displayName(line)}
+                        </span>
+                      ) : (
+                        displayName(line)
+                      )}
                     </div>
                     {tempCellsByLine[line]?.length > 0 && (
                       <div className="text-[9px] text-purple-700 font-semibold leading-tight whitespace-nowrap">
