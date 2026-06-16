@@ -28,7 +28,8 @@ export function DaerimPlanView() {
   const workDate = useDataStore((s) => s.workDate);
   const employees = useDataStore((s) => s.employees);
   const attendance = useDataStore((s) => s.attendance);
-  const { groups, extraFree, missing, lineWorkers } = useDaerimRealloc();
+  const { groups, extraFree, missing, lineWorkers, feederPresentCount } =
+    useDaerimRealloc();
   // 이동 override (간트 라벨 클릭으로 누가 갈지 지정)
   const [overrides, setOverrides] = useState<Record<string, string>>({});
   // 임시 셀(보조 작업셀) 상태
@@ -37,18 +38,20 @@ export function DaerimPlanView() {
   const [tab, setTab] = useState<"main" | "drag">("drag");
 
   // 대림 추가 카테고리 출근 계산 — 메인 대시보드와 동일 로직
+  // - 포장철물: 포장철물 키워드 (category/department/baseLocation/position 중)
+  // - 소사장: '사장님' 키워드 포함
+  // - 피더: useDaerimRealloc 의 feederPresentCount (package2.groups['피더']) 사용
+  //   → employees.category === "피더" 매칭은 실데이터 카테고리와 다를 수 있어 부정확
   const daerimExtras = useMemo(() => {
     const presentCodes = new Set<string>();
     for (const a of attendance) {
       if (a.isPresent) presentCodes.add(a.empCode);
     }
     let sajangPresent = 0;
-    let feederPresent = 0;
     let pojangCheolMulPresent = 0;
     for (const e of employees) {
       if (!e.department.includes("대림산업")) continue;
-      const isPresent = presentCodes.has(e.empCode);
-      if (!isPresent) continue;
+      if (!presentCodes.has(e.empCode)) continue;
       const hasPCM =
         e.category.includes("포장철물") ||
         e.department.includes("포장철물") ||
@@ -62,13 +65,13 @@ export function DaerimPlanView() {
         sajangPresent += 1;
         continue;
       }
-      if (e.category === "피더") {
-        feederPresent += 1;
-        continue;
-      }
     }
-    return { sajangPresent, feederPresent, pojangCheolMulPresent };
-  }, [employees, attendance]);
+    return {
+      sajangPresent,
+      feederPresent: feederPresentCount,
+      pojangCheolMulPresent,
+    };
+  }, [employees, attendance, feederPresentCount]);
 
   // 기본 배치 vs 재배치 결과 → 개선 효과(델타) 계산
   const rBasic = useMemo(

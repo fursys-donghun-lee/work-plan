@@ -19,7 +19,8 @@ export function useDaerimRealloc(): {
   groups: ReallocGroupInput[];
   extraFree: ReallocExtraFree[];
   missing: string[];
-  lineWorkers: Record<string, string[]>; // 라인 이름 → 작업자 이름 리스트
+  lineWorkers: Record<string, string[]>;
+  feederPresentCount: number; // 피더 그룹 출근 인원 (package2.groups['피더'])
 } {
   const packagePosition = useDataStore((s) => s.packagePosition);
   const packageLoad = useDataStore((s) => s.packageLoad);
@@ -177,5 +178,8 @@ export function useDaerimRealloc(): {
   }
   lineWorkers["자동포장라인"] = autoNames;
 
-  return { groups, extraFree, missing, lineWorkers };
+  const feederGroup = result.groups.find((g) => g.group === "피더");
+  const feederPresentCount = feederGroup?.presentMembers.length ?? 0;
+
+  return { groups, extraFree, missing, lineWorkers, feederPresentCount };
 }
