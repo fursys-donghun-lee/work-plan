@@ -48,7 +48,7 @@ const SYNCED_KEYS = [
   "paintPlan",
   "packageLoad",
   "urgentProduction",
-  "workDate",
+  // workDate 는 sync 제외 — 각 PC 의 오늘 날짜로 SessionState 가 설정 (긴급건 D-1/D-2 판정)
   "attendanceMeta",
   "loadPlanMeta",
   "paintPlanMeta",
