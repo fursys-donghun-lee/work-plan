@@ -214,6 +214,10 @@ export function DaerimPlanView() {
           storageKey="drag-plan-confirmed-daerim-v1"
           companyKey="대림산업"
           feederPresentCount={daerimExtras.feederPresent}
+          onConfirmRelease={() => {
+            // 확정 해제 시 포장철물 OT 도 리셋 (메인 대시보드에서 사라짐)
+            setManualPlanPCMOvertimeConfirmed(0);
+          }}
           computeExtraConfirmData={(m) => {
             // 포장철물 잔업확정: 포장2라인 직접 잔업확정 ≥ 1명이면 포장철물 출근 전원 잔업
             const sajang = daerimExtras.sajangPresent;

@@ -54,6 +54,8 @@ interface Props {
     workHours: number;
     idleHours: number;
   }) => Record<string, unknown>;
+  // 확정 해제 시 콜백 — 회사별 confirmed 값 (예: 포장철물 OT) 리셋용
+  onConfirmRelease?: () => void;
 }
 
 // 11 시간 슬롯 (work-time 0..10)
@@ -78,6 +80,7 @@ export function DragPlanView({
   companyKey,
   feederPresentCount = 0,
   computeExtraConfirmData,
+  onConfirmRelease,
 }: Props) {
   // assignments[workerName] = [line at hour 0, ..., hour HOUR_COUNT-1]
   const initialAssignments = useMemo(() => {
@@ -289,12 +292,14 @@ export function DragPlanView({
         setConfirmed(null);
         setLocked(false);
         window.localStorage.removeItem(STORAGE_KEY);
+        onConfirmRelease?.();
         return;
       }
       const handle = window.setTimeout(() => {
         setConfirmed(null);
         setLocked(false);
         window.localStorage.removeItem(STORAGE_KEY);
+        onConfirmRelease?.();
       }, ms);
       return () => window.clearTimeout(handle);
     } catch {
@@ -1059,6 +1064,7 @@ export function DragPlanView({
       if (typeof window !== "undefined") {
         window.localStorage.removeItem(STORAGE_KEY);
       }
+      onConfirmRelease?.();
       return;
     }
     const snap = JSON.parse(JSON.stringify(assignments)) as Record<
