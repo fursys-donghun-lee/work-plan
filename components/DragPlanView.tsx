@@ -93,21 +93,49 @@ export function DragPlanView({
     return m;
   }, [lineWorkers]);
 
-  const [assignments, setAssignments] =
-    useState<Record<string, string[]>>(initialAssignments);
-
   // 확정/잠금 상태 — 확정 시 현재 assignments 를 스냅샷, 다시 누르면 해제
   // 확정된 계획은 localStorage 에 저장되어 새로고침/탭전환 후에도 유지
-  // (그날 24:00 전까지 또는 확정해제 후 수정시까지)
+  // (그날 24:00 전까지 또는 확정해제까지)
   const STORAGE_KEY = storageKey ?? "drag-plan-confirmed-v1";
-  const [confirmed, setConfirmed] = useState<Record<string, string[]> | null>(
-    null
+
+  // localStorage 에서 즉시 (첫 렌더 전) 확정 상태 읽기 — 탭 전환 후에도 즉시 적용
+  const initialStored = (() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(STORAGE_KEY);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as {
+        assignments: Record<string, string[]>;
+        expiresAt: number;
+      };
+      if (Date.now() >= parsed.expiresAt) {
+        window.localStorage.removeItem(STORAGE_KEY);
+        return null;
+      }
+      return parsed;
+    } catch {
+      return null;
+    }
+  })();
+
+  const [assignments, setAssignments] = useState<Record<string, string[]>>(
+    initialStored?.assignments ?? initialAssignments
   );
-  const [locked, setLocked] = useState(false);
+  const [confirmed, setConfirmed] = useState<Record<string, string[]> | null>(
+    initialStored?.assignments ?? null
+  );
+  const [locked, setLocked] = useState<boolean>(!!initialStored);
   const [viewingBasic, setViewingBasic] = useState(false);
 
-  // 화면에 표시할 데이터 source — 기본 보기 중이면 출근 위치 그대로
-  const displayAssignments = viewingBasic ? initialAssignments : assignments;
+  // 화면에 표시할 데이터 source
+  // - 기본 보기 중: 출근 위치 그대로
+  // - 잠금 + 확정 스냅샷 있음: 확정 스냅샷 자체 (state 가 어떻게 흘러도 화면은 확정 그대로)
+  // - 그 외: 현재 assignments
+  const displayAssignments = viewingBasic
+    ? initialAssignments
+    : locked && confirmed
+      ? confirmed
+      : assignments;
 
   const readOnly = locked || viewingBasic;
 
@@ -257,28 +285,8 @@ export function DragPlanView({
     return count >= 2;
   };
 
-  // mount 시 localStorage 에서 확정계획 복원 (만료 안 됐으면)
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    const stored = window.localStorage.getItem(STORAGE_KEY);
-    if (!stored) return;
-    try {
-      const parsed = JSON.parse(stored) as {
-        assignments: Record<string, string[]>;
-        expiresAt: number;
-      };
-      if (Date.now() >= parsed.expiresAt) {
-        window.localStorage.removeItem(STORAGE_KEY);
-        return;
-      }
-      setConfirmed(parsed.assignments);
-      setAssignments(parsed.assignments);
-      setLocked(true);
-    } catch {
-      window.localStorage.removeItem(STORAGE_KEY);
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  // mount 시 복원은 useState lazy init 으로 처리됨 (위 initialStored)
+  // 별도 useEffect 불필요
 
   // 자정에 자동 만료 (페이지 켜둔 채 24:00 넘어가면)
   useEffect(() => {
