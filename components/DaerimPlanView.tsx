@@ -225,7 +225,7 @@ export function DaerimPlanView() {
 
             // 예상 생산액 = 직접인원 × 4.2M + 직접 잔업인원 × 1.5M
             const expectedProduction =
-              directWorkers * 4_200_000 + m.overtimeDirect * 1_500_000;
+              directWorkers * 4_000_000 + m.overtimeDirect * 1_400_000;
             const expectedWorkHours = directWorkers * 8 + m.overtimeDirect * 4.5;
             const expectedProductionPerHour =
               expectedWorkHours > 0

@@ -1125,9 +1125,9 @@ export function DragPlanView({
       const overtimeDirect = confirmedSynthLocal.result.overtimePeople;
       const overtimeFeeder = confirmedSynthLocal.feederOvertime;
 
-      // 예상생산액 — 직접인원 × 4,200,000 + 잔업하는 직접인원 × 1,500,000
-      const PROD_PER_WORKER_8H = 4_200_000;
-      const PROD_OT_PER_PERSON = 1_500_000;
+      // 예상생산액 — 직접인원 × 4,000,000 + 잔업하는 직접인원 × 1,400,000
+      const PROD_PER_WORKER_8H = 4_000_000;
+      const PROD_OT_PER_PERSON = 1_400_000;
       const expectedProduction =
         directWorkers * PROD_PER_WORKER_8H +
         overtimeDirect * PROD_OT_PER_PERSON;

@@ -518,7 +518,7 @@ export function IntegratedDashboard() {
   const _dirExpHours = _dirFinal * 8 + _dirOT * 4.5;
   const _indExpHours = _indFinal * 8 + _indOT * 4.5;
   const totalExpectedHours = _dirExpHours + _indExpHours;
-  const expectedRevenue = _dirFinal * 4_200_000 + _dirOT * 1_500_000;
+  const expectedRevenue = _dirFinal * 4_000_000 + _dirOT * 1_400_000;
   const totalRevenuePerHour =
     totalExpectedHours > 0 ? expectedRevenue / totalExpectedHours : 0;
 
@@ -882,9 +882,9 @@ function DirectIndirectSummary({
     indirect.finalAvailable * 8 + indirect.overtime * 4.5;
   const totalExpectedHours = directExpectedHours + indirectExpectedHours;
 
-  // 예상 생산액 = 직접 최종가용 × 4,200,000 + 직접 잔업필요 × 1,500,000
-  const REVENUE_PER_DIRECT_AVAILABLE = 4_200_000;
-  const REVENUE_PER_DIRECT_OVERTIME = 1_500_000;
+  // 예상 생산액 = 직접 최종가용 × 4,000,000 + 직접 잔업필요 × 1,400,000
+  const REVENUE_PER_DIRECT_AVAILABLE = 4_000_000;
+  const REVENUE_PER_DIRECT_OVERTIME = 1_400_000;
   const expectedRevenue =
     direct.finalAvailable * REVENUE_PER_DIRECT_AVAILABLE +
     direct.overtime * REVENUE_PER_DIRECT_OVERTIME;
@@ -1066,7 +1066,7 @@ function DirectIndirectSummary({
       <p className="text-xs text-slate-400 mt-2">
         ※ 예상 근무시간 = 최종가용 × 8H + 잔업필요 × 4.5H (가중반영)
         <br />
-        ※ 예상 생산액 = 직접 인당 생산액 4,200,000원 기준
+        ※ 예상 생산액 = 직접 인당 생산액 4,000,000원 기준
       </p>
     </div>
   );
