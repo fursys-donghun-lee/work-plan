@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import {
   formatHM,
@@ -963,20 +963,6 @@ export function DragPlanView({
   // 드래그 핸들러
   const [dragging, setDragging] = useState<string | null>(null);
 
-  // 간트 차트 위 화살표 오버레이용 — 셀 DOM 위치 추적
-  const tableWrapperRef = useRef<HTMLDivElement>(null);
-  const cellMapRef = useRef<Map<string, HTMLElement | null>>(new Map());
-  const [arrowPaths, setArrowPaths] = useState<
-    {
-      d: string;
-      label: string;
-      midX: number;
-      midY: number;
-      fromLine: string;
-      toLine: string;
-    }[]
-  >([]);
-
   const handleDragStart = (e: React.DragEvent, worker: string) => {
     if (readOnly) {
       e.preventDefault();
@@ -994,92 +980,6 @@ export function DragPlanView({
     e.dataTransfer.dropEffect = "move";
   };
 
-  // 간트 위에 표시할 화살표 좌표 계산 — 셀 DOM 측정 후 SVG path 산출
-  useEffect(() => {
-    const computeArrows = () => {
-      const wrapper = tableWrapperRef.current;
-      if (!wrapper) return;
-      const wRect = wrapper.getBoundingClientRect();
-      // 이동 추출 (이동 요약과 동일 로직)
-      type Mv = { worker: string; from: string; to: string; time: number };
-      const movements: Mv[] = [];
-      for (const w of allWorkerNames) {
-        const arr = displayAssignments[w];
-        if (!arr) continue;
-        let prevLine = "";
-        for (let h = 0; h < HOUR_COUNT; h++) {
-          const currLine = arr[h] ?? "";
-          if (currLine === "") continue;
-          if (prevLine !== "" && currLine !== prevLine) {
-            movements.push({ worker: w, from: prevLine, to: currLine, time: h });
-          }
-          prevLine = currLine;
-        }
-      }
-      // (from→to@time) 그룹화 → 같은 이동은 화살표 하나
-      const groups = new Map<
-        string,
-        { from: string; to: string; time: number; workers: string[] }
-      >();
-      for (const m of movements) {
-        const key = `${m.from}→${m.to}@${m.time}`;
-        const g = groups.get(key);
-        if (g) g.workers.push(m.worker);
-        else
-          groups.set(key, {
-            from: m.from,
-            to: m.to,
-            time: m.time,
-            workers: [m.worker],
-          });
-      }
-
-      const paths: typeof arrowPaths = [];
-      for (const g of groups.values()) {
-        const fromEl = cellMapRef.current.get(`${g.from}@${g.time - 1}`);
-        const toEl = cellMapRef.current.get(`${g.to}@${g.time}`);
-        if (!fromEl || !toEl) continue;
-        const fr = fromEl.getBoundingClientRect();
-        const tr = toEl.getBoundingClientRect();
-        // 출발: 출발 셀 우측 중앙, 도착: 도착 셀 좌측 중앙
-        const x1 = fr.right - wRect.left;
-        const y1 = fr.top + fr.height / 2 - wRect.top;
-        const x2 = tr.left - wRect.left;
-        const y2 = tr.top + tr.height / 2 - wRect.top;
-        // Cubic Bezier 로 부드러운 S 커브
-        const dx = Math.max(20, Math.abs(x2 - x1) * 0.4);
-        const c1x = x1 + dx;
-        const c1y = y1;
-        const c2x = x2 - dx;
-        const c2y = y2;
-        const d = `M ${x1} ${y1} C ${c1x} ${c1y}, ${c2x} ${c2y}, ${x2} ${y2}`;
-        const midX = (x1 + x2) / 2;
-        const midY = (y1 + y2) / 2;
-        paths.push({
-          d,
-          label: `${g.workers.length}명`,
-          midX,
-          midY,
-          fromLine: g.from,
-          toLine: g.to,
-        });
-      }
-      setArrowPaths(paths);
-    };
-    // 첫 렌더 + 리사이즈 / 변경 시 재계산
-    const raf = requestAnimationFrame(computeArrows);
-    const ro =
-      typeof ResizeObserver !== "undefined"
-        ? new ResizeObserver(computeArrows)
-        : null;
-    if (ro && tableWrapperRef.current) ro.observe(tableWrapperRef.current);
-    window.addEventListener("resize", computeArrows);
-    return () => {
-      cancelAnimationFrame(raf);
-      if (ro) ro.disconnect();
-      window.removeEventListener("resize", computeArrows);
-    };
-  }, [allWorkerNames, displayAssignments, displayLines, lineMeta]);
 
   // 드롭: destHour 부터 destLine 으로 propagate
   //   · 같은 oldLine 셀이 이어지는 한 (기존 동작)
@@ -1435,7 +1335,7 @@ export function DragPlanView({
           </div>
         )}
 
-      <div ref={tableWrapperRef} className="relative">
+      <div>
         <table className="text-xs border-collapse w-full table-fixed">
           <thead>
             <tr>
@@ -1704,11 +1604,6 @@ export function DragPlanView({
                     return (
                       <td
                         key={`w-${s.wt}`}
-                        ref={(el) => {
-                          if (el)
-                            cellMapRef.current.set(`${line}@${s.wt}`, el);
-                          else cellMapRef.current.delete(`${line}@${s.wt}`);
-                        }}
                         onDragOver={handleDragOver}
                         onDrop={(e) => handleDrop(e, line, s.wt)}
                         className={cn(
@@ -1873,49 +1768,6 @@ export function DragPlanView({
             }, [])}
           </tbody>
         </table>
-        {/* 인원 이동 화살표 오버레이 */}
-        {arrowPaths.length > 0 && (
-          <svg
-            className="absolute inset-0 w-full h-full pointer-events-none"
-            style={{ overflow: "visible" }}
-          >
-            <defs>
-              <marker
-                id="dpv-arrowhead"
-                markerWidth="10"
-                markerHeight="10"
-                refX="8"
-                refY="3"
-                orient="auto"
-              >
-                <polygon points="0 0, 10 3, 0 6" fill="rgb(234 88 12)" />
-              </marker>
-            </defs>
-            {arrowPaths.map((a, i) => (
-              <g key={i}>
-                <path
-                  d={a.d}
-                  stroke="rgb(234 88 12)"
-                  strokeWidth="2"
-                  fill="none"
-                  opacity="0.7"
-                  markerEnd="url(#dpv-arrowhead)"
-                />
-                <text
-                  x={a.midX}
-                  y={a.midY - 4}
-                  fill="rgb(124 45 18)"
-                  fontSize="10"
-                  fontWeight="bold"
-                  textAnchor="middle"
-                  style={{ paintOrder: "stroke", stroke: "white", strokeWidth: "3px" }}
-                >
-                  {a.label}
-                </text>
-              </g>
-            ))}
-          </svg>
-        )}
       </div>
 
       <div className="flex items-center gap-3 mt-3 text-[10px] text-slate-500 flex-wrap">
