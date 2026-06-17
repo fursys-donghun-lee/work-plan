@@ -20,6 +20,7 @@ import {
   computeReallocation,
   type ReallocResult,
 } from "@/lib/calc/reallocation";
+import { buildPresentEmpCodes } from "@/lib/calc/groupLoad";
 import { cn } from "@/lib/utils";
 
 // 재배치 계획 비교 탭: 기본 배치(이동 없음) vs 재배치 로직 두 간트를 위·아래로 표시
@@ -41,19 +42,20 @@ export function DaerimPlanView() {
   const [tab, setTab] = useState<"main" | "drag">("drag");
 
   // 대림 추가 카테고리 출근/총인원 계산 — 메인 대시보드 분류와 정확히 동일
+  // (buildPresentEmpCodes 로 퍼시스 자동출근 처리도 일치시킴)
   const daerimExtras = useMemo(() => {
-    const presentCodes = new Set<string>();
-    for (const a of attendance) {
-      if (a.isPresent) presentCodes.add(a.empCode);
-    }
-    let totalDaerimEmployees = 0; // 대림 부서 전체 (출근 + 미출근)
+    const presentCodes = buildPresentEmpCodes(attendance, employees);
+    let totalPeople = 0; // 대림 부서 전체 (메인 대시보드 총인원)
+    let totalAttendance = 0; // 대림 부서 출근자 전체 (메인 대시보드 출근)
     let sajangPresent = 0;
     let pojangCheolMulPresent = 0;
     let pojang2CategoryCount = 0;
     for (const e of employees) {
       if (!e.department.includes("대림산업")) continue;
-      totalDaerimEmployees += 1;
-      if (!presentCodes.has(e.empCode)) continue;
+      totalPeople += 1;
+      const isPresent = presentCodes.has(e.empCode);
+      if (!isPresent) continue;
+      totalAttendance += 1;
       const hasPCM =
         e.category.includes("포장철물") ||
         e.department.includes("포장철물") ||
@@ -77,7 +79,9 @@ export function DaerimPlanView() {
       pojang2CategoryCount - feederPresentCount
     );
     return {
-      totalDaerimEmployees,
+      totalPeople,
+      totalAttendance,
+      totalAbsent: Math.max(0, totalPeople - totalAttendance),
       sajangPresent,
       feederPresent: feederPresentCount,
       pojangCheolMulPresent,
@@ -215,46 +219,48 @@ export function DaerimPlanView() {
           }}
           computeExtraConfirmData={(m) => {
             // 포장철물 잔업확정: 포장2라인 직접 잔업확정 ≥ 1명이면 포장철물 출근 전원 잔업
-            const sajang = daerimExtras.sajangPresent;
-            const feeder = daerimExtras.feederPresent;
             const pcm = daerimExtras.pojangCheolMulPresent;
             const directWorkers = daerimExtras.directWorkerCount;
             const pojangCheolMulOTConfirmed = m.overtimeDirect >= 1 ? pcm : 0;
             // 메인 대시보드 표시용 store 에 push
             setManualPlanPCMOvertimeConfirmed(pojangCheolMulOTConfirmed);
 
-            // 예상 생산액 = 직접인원 × 4.2M + 직접 잔업인원 × 1.5M
+            // 예상 생산액 = 직접인원 × 4.0M + 직접 잔업인원 × 1.4M
             const expectedProduction =
               directWorkers * 4_000_000 + m.overtimeDirect * 1_400_000;
-            const expectedWorkHours = directWorkers * 8 + m.overtimeDirect * 4.5;
-            const expectedProductionPerHour =
-              expectedWorkHours > 0
-                ? Math.round(expectedProduction / expectedWorkHours)
-                : 0;
 
-            const totalAttendance =
-              directWorkers + sajang + feeder + pcm;
-            const totalAbsent = Math.max(
-              0,
-              daerimExtras.totalDaerimEmployees - totalAttendance
-            );
+            // 총인원/출근/미출근 = 메인 대시보드와 동일 (대림 부서 전체 기준)
+            const totalPeople = daerimExtras.totalPeople;
+            const totalAttendance = daerimExtras.totalAttendance;
+            const totalAbsent = daerimExtras.totalAbsent;
+
+            // 잔업확정 = 재배치 확정 (직접 + 피더 + 포장철물)
             const overtimePeople =
               m.overtimeDirect + m.overtimeFeeder + pojangCheolMulOTConfirmed;
-            // 시간 메트릭
+
+            // 기본근무시간 = 출근인원 × 8h
+            // 잔업근무시간 = 잔업확정 인원 × 3h
+            // 가중근무시간 = 기본 + 잔업 × 1.5
             const standardHours = totalAttendance * 8;
             const overtimeHours = overtimePeople * 3;
             const weightedHours = standardHours + overtimeHours * 1.5;
 
+            // 시간당생산액 = 생산액 / 가중근무시간
+            const expectedProductionPerHour =
+              weightedHours > 0
+                ? Math.round(expectedProduction / weightedHours)
+                : 0;
+
             return {
               directWorkers,
-              sajangPresent: sajang,
+              sajangPresent: daerimExtras.sajangPresent,
               pojangCheolMulPresent: pcm,
               pojangCheolMulOTConfirmed,
               expectedProduction,
-              expectedWorkHours,
+              expectedWorkHours: weightedHours,
               expectedProductionPerHour,
-              // 신규 메트릭 (관리자 일자별 페이지용)
-              totalPeople: daerimExtras.totalDaerimEmployees,
+              // 일자별 페이지 메트릭 (메인 대시보드 로직 일치)
+              totalPeople,
               totalAttendance,
               totalAbsent,
               overtimePeople,
