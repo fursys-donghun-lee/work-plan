@@ -1015,6 +1015,7 @@ export function DragPlanView({
     setAssignments(initialAssignments);
     setStickyPriorities({});
     setTempCells([]);
+    setAutoMoveLog(null);
   };
 
   // 자동 배치 이동 로그 (어떤 워커가 언제 어디로 갔는지)
@@ -1024,7 +1025,26 @@ export function DragPlanView({
     from: string;
     to: string;
   };
-  const [autoMoveLog, setAutoMoveLog] = useState<AutoMoveLog[] | null>(null);
+  // 자동 배치 이동내역 — localStorage 에 보존 (탭 이동 후에도 유지)
+  const AUTO_LOG_KEY = `${STORAGE_KEY}-auto-log`;
+  const [autoMoveLog, setAutoMoveLog] = useState<AutoMoveLog[] | null>(() => {
+    if (typeof window === "undefined") return null;
+    try {
+      const raw = window.localStorage.getItem(AUTO_LOG_KEY);
+      if (!raw) return null;
+      return JSON.parse(raw) as AutoMoveLog[];
+    } catch {
+      return null;
+    }
+  });
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    if (autoMoveLog && autoMoveLog.length > 0) {
+      window.localStorage.setItem(AUTO_LOG_KEY, JSON.stringify(autoMoveLog));
+    } else {
+      window.localStorage.removeItem(AUTO_LOG_KEY);
+    }
+  }, [autoMoveLog, AUTO_LOG_KEY]);
 
   // 자동 배치 — 재배치 알고리즘(result.moves) 결과를 워커별·시간별 배치로 변환
   const handleAutoPlace = () => {
@@ -1591,30 +1611,48 @@ export function DragPlanView({
                         title={`${formatHM(s.wallStart)}~${formatHM(s.wallEnd)} ${s.isOT ? "(잔업)" : ""}`}
                       >
                         <div className="flex flex-wrap gap-0.5">
-                          {workers.map((w) => (
-                            <div
-                              key={w}
-                              draggable={!readOnly}
-                              onDragStart={(e) => handleDragStart(e, w)}
-                              onDragEnd={handleDragEnd}
-                              className={cn(
-                                "text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap",
-                                readOnly ? "cursor-default" : "cursor-move",
-                                workers.length >= 2
-                                  ? "bg-blue-500 text-white"
-                                  : "bg-yellow-200 border border-yellow-400 text-slate-800",
-                                dragging === w &&
-                                  "ring-2 ring-orange-500 opacity-50"
-                              )}
-                              title={
-                                readOnly
-                                  ? w
-                                  : `${w} — 드래그해서 다른 라인·시간으로 이동`
-                              }
-                            >
-                              {w}
-                            </div>
-                          ))}
+                          {workers.map((w) => {
+                            // 이전 시각의 이 워커 라인 — 다르면 '이동해 옴' 표시
+                            const prevLine =
+                              s.wt > 0
+                                ? (displayAssignments[w]?.[s.wt - 1] ?? "")
+                                : "";
+                            const justArrived =
+                              prevLine !== "" && prevLine !== line;
+                            return (
+                              <div
+                                key={w}
+                                draggable={!readOnly}
+                                onDragStart={(e) => handleDragStart(e, w)}
+                                onDragEnd={handleDragEnd}
+                                className={cn(
+                                  "text-[10px] font-bold px-1.5 py-0.5 rounded whitespace-nowrap",
+                                  readOnly ? "cursor-default" : "cursor-move",
+                                  workers.length >= 2
+                                    ? "bg-blue-500 text-white"
+                                    : "bg-yellow-200 border border-yellow-400 text-slate-800",
+                                  dragging === w &&
+                                    "ring-2 ring-orange-500 opacity-50",
+                                  justArrived &&
+                                    "ring-2 ring-orange-400 ring-offset-1"
+                                )}
+                                title={
+                                  justArrived
+                                    ? `${w} — ${displayName(prevLine)} → ${displayName(line)} 이동 (${formatHM(s.wallStart)})`
+                                    : readOnly
+                                      ? w
+                                      : `${w} — 드래그해서 다른 라인·시간으로 이동`
+                                }
+                              >
+                                {justArrived && (
+                                  <span className="text-orange-600 mr-0.5">
+                                    ↪
+                                  </span>
+                                )}
+                                {w}
+                              </div>
+                            );
+                          })}
                         </div>
                         {/* 완료 표시 (낭비 아닌 경우만) */}
                         {isComplete && !wasteful && (
@@ -1743,6 +1781,10 @@ export function DragPlanView({
         <span className="inline-flex items-center gap-1">
           <span className="w-3 h-3 rounded bg-amber-50 border-2 border-amber-400 inline-block" />
           여유 (인원이동 가이드 표시)
+        </span>
+        <span className="inline-flex items-center gap-1">
+          <span className="text-orange-600 font-bold">↪</span>
+          이동해 옴 (다른 라인에서)
         </span>
         <span className="inline-flex items-center gap-1">
           <span className="w-3 h-3 rounded bg-purple-100 border-2 border-dashed border-purple-500 inline-block" />
