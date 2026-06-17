@@ -1405,7 +1405,7 @@ export function DragPlanView({
               }
               type StatusBadge = {
                 text: string;
-                tone: "rose" | "amber" | "slate";
+                tone: "rose" | "amber" | "slate" | "emerald" | "blue";
                 title: string;
               };
               let statusBadge: StatusBadge | null = null;
@@ -1415,9 +1415,9 @@ export function DragPlanView({
                   done < load - 0.01 &&
                   maxHcInLoad < 2
                 ) {
-                  // 부족 + 짝 미완성만 → 인원배정필요 (2명 짝 차있으면 배지 미표시)
+                  // 부족 → 지원필요
                   statusBadge = {
-                    text: "인원배정필요",
+                    text: "지원필요",
                     tone: "rose",
                     title: `부하 ${load.toFixed(1)}인시 중 ${done.toFixed(1)}인시 처리 — 추가 ${(load - done).toFixed(1)}인시 필요`,
                   };
@@ -1425,13 +1425,21 @@ export function DragPlanView({
                   maxHcInLoad > 0 &&
                   (load <= 0.01 || done >= load + 1)
                 ) {
+                  // 여유 → 지원가능
                   statusBadge = {
-                    text: "인원여유",
-                    tone: "slate",
+                    text: "지원가능",
+                    tone: "blue",
                     title:
                       load <= 0.01
                         ? `이 라인에 부하 없음 (${maxHcInLoad}명 배치됨)`
                         : `부하 ${load.toFixed(1)}인시 대비 ${done.toFixed(1)}인시 처리 — ${(done - load).toFixed(1)}인시 여유`,
+                  };
+                } else {
+                  // 그 외 → 정상
+                  statusBadge = {
+                    text: "정상",
+                    tone: "emerald",
+                    title: `부하 ${load.toFixed(1)}인시 / 처리 ${done.toFixed(1)}인시`,
                   };
                 }
               }
@@ -1502,7 +1510,11 @@ export function DragPlanView({
                             ? "text-rose-700 bg-rose-100 border-rose-300"
                             : statusBadge.tone === "amber"
                               ? "text-amber-800 bg-amber-100 border-amber-400"
-                              : "text-slate-600 bg-slate-100 border-slate-300"
+                              : statusBadge.tone === "blue"
+                                ? "text-blue-700 bg-blue-100 border-blue-300"
+                                : statusBadge.tone === "emerald"
+                                  ? "text-emerald-700 bg-emerald-100 border-emerald-300"
+                                  : "text-slate-600 bg-slate-100 border-slate-300"
                         )}
                         title={statusBadge.title}
                       >
@@ -1795,73 +1807,81 @@ export function DragPlanView({
         <span>· 라인 라벨 클릭해서 임시셀 구성</span>
       </div>
     </div>
-    {/* 자동 배치 이동 로그 */}
-    {autoMoveLog && autoMoveLog.length > 0 && (
-      <div className="card border-indigo-200 bg-indigo-50/40">
-        <div className="flex items-center justify-between mb-2">
-          <h2 className="font-semibold text-slate-900">
-            ✨ 자동 배치 이동 내역
+    {/* 이동 요약 — 현재 배치 기준 (모든 이동 자동 추출) */}
+    {(() => {
+      // 워커별 이동: A 라인 → B 라인 (시간 t 에서)
+      type Mv = { worker: string; from: string; to: string; time: number };
+      const movements: Mv[] = [];
+      for (const w of allWorkerNames) {
+        const arr = displayAssignments[w];
+        if (!arr) continue;
+        let prevLine = "";
+        for (let h = 0; h < HOUR_COUNT; h++) {
+          const currLine = arr[h] ?? "";
+          if (currLine === "") continue;
+          if (prevLine !== "" && currLine !== prevLine) {
+            movements.push({ worker: w, from: prevLine, to: currLine, time: h });
+          }
+          prevLine = currLine;
+        }
+      }
+      if (movements.length === 0) return null;
+      // (from → to → time) 별 그룹화
+      type Key = string;
+      const groups = new Map<
+        Key,
+        { from: string; to: string; time: number; workers: string[] }
+      >();
+      for (const m of movements) {
+        const key = `${m.from}→${m.to}@${m.time}`;
+        const g = groups.get(key);
+        if (g) g.workers.push(m.worker);
+        else
+          groups.set(key, {
+            from: m.from,
+            to: m.to,
+            time: m.time,
+            workers: [m.worker],
+          });
+      }
+      const groupArr = Array.from(groups.values()).sort(
+        (a, b) => a.time - b.time || a.from.localeCompare(b.from)
+      );
+      return (
+        <div className="card border-indigo-200 bg-indigo-50/30">
+          <h2 className="font-semibold text-slate-900 mb-2">
+            🔀 인원 이동 요약
             <span className="ml-2 text-xs font-normal text-slate-500">
-              총 {autoMoveLog.length}명 이동
+              총 {movements.length}건
             </span>
           </h2>
-          <button
-            type="button"
-            onClick={() => setAutoMoveLog(null)}
-            className="text-xs text-slate-500 hover:text-slate-800"
-          >
-            닫기
-          </button>
+          <div className="space-y-1.5">
+            {groupArr.map((g) => (
+              <div
+                key={`${g.from}-${g.to}-${g.time}`}
+                className="flex items-center gap-2 text-sm bg-white border border-indigo-200 rounded px-3 py-1.5"
+              >
+                <span className="text-xs font-bold text-indigo-800 min-w-[3.5rem]">
+                  {formatHM(workTimeToWall(g.time))}
+                </span>
+                <span className="font-semibold text-slate-700 min-w-[5rem]">
+                  {displayName(g.from)}
+                </span>
+                <span className="text-indigo-500 font-bold">→</span>
+                <span className="font-semibold text-indigo-700 min-w-[5rem]">
+                  {displayName(g.to)}
+                </span>
+                <span className="text-slate-400">·</span>
+                <span className="text-slate-700 text-xs">
+                  {g.workers.join(", ")}{" "}
+                  <span className="text-slate-500">({g.workers.length}명)</span>
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-        {(() => {
-          const byTime = new Map<number, AutoMoveLog[]>();
-          for (const m of autoMoveLog) {
-            const arr = byTime.get(m.time) ?? [];
-            arr.push(m);
-            byTime.set(m.time, arr);
-          }
-          const times = Array.from(byTime.keys()).sort((a, b) => a - b);
-          return (
-            <div className="space-y-2">
-              {times.map((t) => {
-                const items = byTime.get(t)!;
-                const wallStart = workTimeToWall(t);
-                return (
-                  <div
-                    key={t}
-                    className="border border-indigo-200 rounded p-2 bg-white"
-                  >
-                    <div className="text-xs font-bold text-indigo-800 mb-1">
-                      {formatHM(wallStart)} · {items.length}명 이동
-                    </div>
-                    <div className="flex flex-wrap gap-1.5">
-                      {items.map((m, idx) => (
-                        <div
-                          key={`${t}-${idx}`}
-                          className="text-xs px-2 py-1 rounded bg-slate-50 border border-slate-200"
-                        >
-                          <span className="font-semibold text-slate-700">
-                            {m.worker}
-                          </span>
-                          <span className="text-slate-500 mx-1">·</span>
-                          <span className="text-slate-600">
-                            {displayName(m.from)}
-                          </span>
-                          <span className="text-indigo-500 mx-1">→</span>
-                          <span className="font-semibold text-indigo-700">
-                            {displayName(m.to)}
-                          </span>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                );
-              })}
-            </div>
-          );
-        })()}
-      </div>
-    )}
+      );
+    })()}
     {/* 임시셀 구성 모달 */}
     {tempCellModalLine && (
       <TempCellModal
