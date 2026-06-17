@@ -1,43 +1,153 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { useDataStore } from "@/lib/store/useDataStore";
+import { useEffect, useMemo, useState } from "react";
 import { useHydrated } from "@/components/useComputed";
 import { AdminGuard } from "@/components/AdminGuard";
 import { getDb, isFirebaseConfigured } from "@/lib/firebase";
 import {
   collection,
+  doc,
   getDocs,
+  onSnapshot,
   orderBy,
   query,
+  setDoc,
 } from "firebase/firestore";
 import { cn } from "@/lib/utils";
 
-interface DailyPlanDoc {
+interface PlanDoc {
   date: string;
   company: string;
-  directWorkers: number;
-  feederPresent: number;
-  overtimeDirect: number;
-  overtimeFeeder: number;
+  // 인원
+  totalPeople?: number;
+  totalAttendance?: number;
+  totalAbsent?: number;
+  overtimePeople?: number;
+  // 직접 (생산액 산식용)
+  directWorkers?: number;
+  overtimeDirect?: number;
+  // 시간
+  standardHours?: number;
+  overtimeHours?: number;
+  weightedHours?: number;
+  // 생산액
+  expectedProduction?: number;
+  expectedWorkHours?: number;
+  expectedProductionPerHour?: number;
+}
+
+interface ActualDoc {
+  date: string;
+  company: string;
+  totalPeople?: number;
+  totalAttendance?: number;
+  totalAbsent?: number;
+  overtimePeople?: number;
+  standardHours?: number;
+  overtimeHours?: number;
+  weightedHours?: number;
+  expectedProduction?: number;
+  expectedProductionPerHour?: number;
+}
+
+interface Metrics {
+  totalPeople: number;
+  totalAttendance: number;
+  totalAbsent: number;
+  overtimePeople: number;
+  standardHours: number;
+  overtimeHours: number;
+  weightedHours: number;
   expectedProduction: number;
-  expectedWorkHours: number;
   expectedProductionPerHour: number;
-  totalLoad: number;
-  workHours: number;
-  idleHours: number;
-  totalCarry: number;
-  // 대림 추가 필드
-  sajangPresent?: number;
-  pojangCheolMulPresent?: number;
-  pojangCheolMulOTConfirmed?: number;
-  totalAttendance?: number; // 합산 출근 (직접+소사장+피더+포장철물)
-  totalOT?: number; // 합산 잔업
+}
+
+function blankMetrics(): Metrics {
+  return {
+    totalPeople: 0,
+    totalAttendance: 0,
+    totalAbsent: 0,
+    overtimePeople: 0,
+    standardHours: 0,
+    overtimeHours: 0,
+    weightedHours: 0,
+    expectedProduction: 0,
+    expectedProductionPerHour: 0,
+  };
+}
+
+function planToMetrics(p: PlanDoc): Metrics {
+  return {
+    totalPeople: p.totalPeople ?? 0,
+    totalAttendance: p.totalAttendance ?? 0,
+    totalAbsent: p.totalAbsent ?? 0,
+    overtimePeople: p.overtimePeople ?? 0,
+    standardHours: p.standardHours ?? 0,
+    overtimeHours: p.overtimeHours ?? 0,
+    weightedHours: p.weightedHours ?? 0,
+    expectedProduction: p.expectedProduction ?? 0,
+    expectedProductionPerHour: p.expectedProductionPerHour ?? 0,
+  };
+}
+
+function actualToMetrics(a: ActualDoc): Metrics {
+  return {
+    totalPeople: a.totalPeople ?? 0,
+    totalAttendance: a.totalAttendance ?? 0,
+    totalAbsent: a.totalAbsent ?? 0,
+    overtimePeople: a.overtimePeople ?? 0,
+    standardHours: a.standardHours ?? 0,
+    overtimeHours: a.overtimeHours ?? 0,
+    weightedHours: a.weightedHours ?? 0,
+    expectedProduction: a.expectedProduction ?? 0,
+    expectedProductionPerHour: a.expectedProductionPerHour ?? 0,
+  };
+}
+
+function sumMetrics(arr: Metrics[]): Metrics {
+  const out = blankMetrics();
+  for (const m of arr) {
+    out.totalPeople += m.totalPeople;
+    out.totalAttendance += m.totalAttendance;
+    out.totalAbsent += m.totalAbsent;
+    out.overtimePeople += m.overtimePeople;
+    out.standardHours += m.standardHours;
+    out.overtimeHours += m.overtimeHours;
+    out.weightedHours += m.weightedHours;
+    out.expectedProduction += m.expectedProduction;
+  }
+  out.expectedProductionPerHour =
+    out.weightedHours > 0
+      ? Math.round(out.expectedProduction / out.weightedHours)
+      : 0;
+  return out;
 }
 
 function formatMoney(n: number): string {
   return n.toLocaleString("ko-KR") + "원";
 }
+
+const ROWS: {
+  key: keyof Metrics;
+  label: string;
+  unit: string;
+  isMoney?: boolean;
+}[] = [
+  { key: "totalPeople", label: "총인원", unit: "명" },
+  { key: "totalAttendance", label: "총출근", unit: "명" },
+  { key: "totalAbsent", label: "미출근", unit: "명" },
+  { key: "overtimePeople", label: "잔업인원", unit: "명" },
+  { key: "standardHours", label: "기본근무시간", unit: "h" },
+  { key: "overtimeHours", label: "잔업근무시간", unit: "h" },
+  { key: "weightedHours", label: "가중근무시간", unit: "h" },
+  { key: "expectedProduction", label: "생산액", unit: "원", isMoney: true },
+  {
+    key: "expectedProductionPerHour",
+    label: "시간당생산액",
+    unit: "원",
+    isMoney: true,
+  },
+];
 
 export default function DailyPlansPage() {
   return (
@@ -47,97 +157,208 @@ export default function DailyPlansPage() {
   );
 }
 
+function todayStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function thisMonthStr(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+}
+
 function DailyPlansContent() {
   const hydrated = useHydrated();
-  const [docs, setDocs] = useState<DailyPlanDoc[]>([]);
+  const [plans, setPlans] = useState<PlanDoc[]>([]);
+  const [actuals, setActuals] = useState<ActualDoc[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
+  const [mode, setMode] = useState<"day" | "month">("day");
+  const [selectedDate, setSelectedDate] = useState(todayStr);
+  const [selectedMonth, setSelectedMonth] = useState(thisMonthStr);
 
+  // Firestore subscribe — plans & actuals
   useEffect(() => {
     if (!isFirebaseConfigured()) {
-      setError("Firebase 설정이 필요합니다");
+      setError("Firebase 설정 필요");
       setLoading(false);
       return;
     }
     const db = getDb();
-    const q = query(collection(db, "dailyPlans"), orderBy("date", "desc"));
-    getDocs(q)
-      .then((snap) => {
-        const arr: DailyPlanDoc[] = [];
-        snap.forEach((d) => arr.push(d.data() as DailyPlanDoc));
-        setDocs(arr);
+    const qPlans = query(collection(db, "dailyPlans"), orderBy("date", "desc"));
+    const unsubPlans = onSnapshot(
+      qPlans,
+      (snap) => {
+        const arr: PlanDoc[] = [];
+        snap.forEach((d) => arr.push(d.data() as PlanDoc));
+        setPlans(arr);
         setLoading(false);
-      })
-      .catch((e) => {
+      },
+      (e) => {
         setError(String(e));
         setLoading(false);
-      });
+      }
+    );
+    // dailyActuals — collection might not exist yet; getDocs is OK
+    getDocs(query(collection(db, "dailyActuals")))
+      .then((snap) => {
+        const arr: ActualDoc[] = [];
+        snap.forEach((d) => arr.push(d.data() as ActualDoc));
+        setActuals(arr);
+      })
+      .catch(() => {});
+    return () => unsubPlans();
   }, []);
 
+  // 회사 목록
+  const companies = useMemo(() => {
+    const s = new Set<string>();
+    plans.forEach((p) => s.add(p.company));
+    return Array.from(s).sort();
+  }, [plans]);
+
+  // 일자 모드: 선택일자의 회사별 (계획, 실적) 매트릭스
+  const dayData = useMemo(() => {
+    return companies.map((company) => {
+      const plan = plans.find(
+        (p) => p.date === selectedDate && p.company === company
+      );
+      const actual = actuals.find(
+        (a) => a.date === selectedDate && a.company === company
+      );
+      return {
+        company,
+        plan: plan ? planToMetrics(plan) : blankMetrics(),
+        actual: actual ? actualToMetrics(actual) : blankMetrics(),
+        hasPlan: !!plan,
+        hasActual: !!actual,
+      };
+    });
+  }, [companies, plans, actuals, selectedDate]);
+
+  // 월 모드: 선택월의 회사별 누계
+  const monthData = useMemo(() => {
+    return companies.map((company) => {
+      const planRecords = plans.filter(
+        (p) => p.date.startsWith(selectedMonth) && p.company === company
+      );
+      const actualRecords = actuals.filter(
+        (a) => a.date.startsWith(selectedMonth) && a.company === company
+      );
+      return {
+        company,
+        planDays: planRecords.length,
+        actualDays: actualRecords.length,
+        plan: sumMetrics(planRecords.map(planToMetrics)),
+        actual: sumMetrics(actualRecords.map(actualToMetrics)),
+      };
+    });
+  }, [companies, plans, actuals, selectedMonth]);
+
+  // 선택일자 옵션 — plans 에 있는 날짜들
+  const availableDates = useMemo(() => {
+    const s = new Set<string>();
+    plans.forEach((p) => s.add(p.date));
+    actuals.forEach((a) => s.add(a.date));
+    s.add(todayStr());
+    return Array.from(s).sort().reverse();
+  }, [plans, actuals]);
+
+  const availableMonths = useMemo(() => {
+    const s = new Set<string>();
+    plans.forEach((p) => s.add(p.date.substring(0, 7)));
+    actuals.forEach((a) => s.add(a.date.substring(0, 7)));
+    s.add(thisMonthStr());
+    return Array.from(s).sort().reverse();
+  }, [plans, actuals]);
+
+  // 실적 편집 핸들러
+  const updateActual = async (date: string, company: string, m: Metrics) => {
+    if (!isFirebaseConfigured()) return;
+    const docId = `${date}_${company}`;
+    await setDoc(doc(getDb(), "dailyActuals", docId), {
+      date,
+      company,
+      ...m,
+    });
+    // 로컬 상태 즉시 갱신
+    setActuals((prev) => {
+      const idx = prev.findIndex(
+        (a) => a.date === date && a.company === company
+      );
+      const next = [...prev];
+      const newDoc: ActualDoc = { date, company, ...m };
+      if (idx >= 0) next[idx] = newDoc;
+      else next.push(newDoc);
+      return next;
+    });
+  };
+
   if (!hydrated) return null;
-
-  // 일자별 그룹화 (한 날짜에 여러 회사 가능)
-  const byDate = new Map<string, DailyPlanDoc[]>();
-  for (const d of docs) {
-    const arr = byDate.get(d.date) ?? [];
-    arr.push(d);
-    byDate.set(d.date, arr);
-  }
-  const dates = Array.from(byDate.keys()).sort((a, b) => b.localeCompare(a));
-
-  // 합계 (전체)
-  const total = docs.reduce(
-    (acc, d) => ({
-      directWorkers: acc.directWorkers + d.directWorkers,
-      overtimeDirect: acc.overtimeDirect + d.overtimeDirect,
-      expectedProduction: acc.expectedProduction + d.expectedProduction,
-      expectedWorkHours: acc.expectedWorkHours + d.expectedWorkHours,
-    }),
-    {
-      directWorkers: 0,
-      overtimeDirect: 0,
-      expectedProduction: 0,
-      expectedWorkHours: 0,
-    }
-  );
-  const totalProdPerHour =
-    total.expectedWorkHours > 0
-      ? Math.round(total.expectedProduction / total.expectedWorkHours)
-      : 0;
 
   return (
     <div className="space-y-5">
       <div>
         <h1 className="text-2xl font-bold text-slate-900">
-          일자별 근무계획 / 예상생산액
+          일자별 근무계획 / 실적
         </h1>
         <p className="text-sm text-slate-500 mt-1">
-          확정한 일자별 근무계획 데이터 누적 (관리자 전용)
+          계획(확정 시점) 과 실적(수동 입력) 비교 — 관리자 전용
         </p>
       </div>
 
-      {/* 합계 카드 */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <SummaryCard
-          label="총 직접 인원-일"
-          value={`${total.directWorkers}명`}
-          tone="slate"
-        />
-        <SummaryCard
-          label="총 잔업 인원-일"
-          value={`${total.overtimeDirect}명`}
-          tone="rose"
-        />
-        <SummaryCard
-          label="누적 예상 생산액"
-          value={formatMoney(total.expectedProduction)}
-          tone="emerald"
-        />
-        <SummaryCard
-          label="평균 시간당생산액"
-          value={formatMoney(totalProdPerHour)}
-          tone="indigo"
-        />
+      {/* 모드 토글 */}
+      <div className="flex items-center gap-2">
+        <button
+          type="button"
+          onClick={() => setMode("day")}
+          className={cn(
+            "px-4 py-1.5 rounded font-semibold text-sm",
+            mode === "day"
+              ? "bg-blue-600 text-white"
+              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+          )}
+        >
+          일자
+        </button>
+        <button
+          type="button"
+          onClick={() => setMode("month")}
+          className={cn(
+            "px-4 py-1.5 rounded font-semibold text-sm",
+            mode === "month"
+              ? "bg-blue-600 text-white"
+              : "bg-slate-100 text-slate-700 hover:bg-slate-200"
+          )}
+        >
+          월 누계
+        </button>
+        <div className="ml-4">
+          {mode === "day" ? (
+            <select
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              className="text-sm border border-slate-300 rounded px-2 py-1"
+            >
+              {availableDates.map((d) => (
+                <option key={d} value={d}>
+                  {d}
+                </option>
+              ))}
+            </select>
+          ) : (
+            <select
+              value={selectedMonth}
+              onChange={(e) => setSelectedMonth(e.target.value)}
+              className="text-sm border border-slate-300 rounded px-2 py-1"
+            >
+              {availableMonths.map((m) => (
+                <option key={m} value={m}>
+                  {m}
+                </option>
+              ))}
+            </select>
+          )}
+        </div>
       </div>
 
       {loading && (
@@ -150,163 +371,65 @@ function DailyPlansContent() {
           {error}
         </div>
       )}
-      {!loading && !error && docs.length === 0 && (
+
+      {!loading &&
+        !error &&
+        (mode === "day"
+          ? dayData.map(({ company, plan, actual, hasPlan, hasActual }) => (
+              <DayCompanyCard
+                key={company}
+                company={company}
+                date={selectedDate}
+                plan={plan}
+                actual={actual}
+                hasPlan={hasPlan}
+                hasActual={hasActual}
+                onActualChange={(m) => updateActual(selectedDate, company, m)}
+              />
+            ))
+          : monthData.map(
+              ({ company, plan, actual, planDays, actualDays }) => (
+                <MonthCompanyCard
+                  key={company}
+                  company={company}
+                  month={selectedMonth}
+                  plan={plan}
+                  actual={actual}
+                  planDays={planDays}
+                  actualDays={actualDays}
+                />
+              )
+            ))}
+
+      {!loading && !error && companies.length === 0 && (
         <div className="card text-center py-8 text-slate-500">
-          확정된 일자별 근무계획이 없습니다. /plan 페이지에서 [확정] 을
-          누르면 그날의 계획이 저장됩니다.
+          확정된 계획이 없습니다. /plan 페이지에서 [확정] 을 누르면 그날의
+          계획이 저장됩니다.
         </div>
       )}
 
-      {/* 일자별 카드 */}
-      {dates.map((date) => {
-        const rows = byDate.get(date) ?? [];
-        const dailyTotal = rows.reduce(
-          (acc, r) => ({
-            directWorkers: acc.directWorkers + r.directWorkers,
-            overtimeDirect: acc.overtimeDirect + r.overtimeDirect,
-            expectedProduction: acc.expectedProduction + r.expectedProduction,
-            expectedWorkHours: acc.expectedWorkHours + r.expectedWorkHours,
-          }),
-          {
-            directWorkers: 0,
-            overtimeDirect: 0,
-            expectedProduction: 0,
-            expectedWorkHours: 0,
-          }
-        );
-        const dailyPerHour =
-          dailyTotal.expectedWorkHours > 0
-            ? Math.round(
-                dailyTotal.expectedProduction / dailyTotal.expectedWorkHours
-              )
-            : 0;
-        return (
-          <div key={date} className="card">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-lg font-bold text-slate-900">{date}</h2>
-              <div className="text-sm text-slate-600">
-                <span className="font-semibold text-emerald-700">
-                  {formatMoney(dailyTotal.expectedProduction)}
-                </span>
-                <span className="text-slate-400 mx-2">·</span>
-                <span>
-                  시간당생산액{" "}
-                  <span className="font-semibold text-indigo-700">
-                    {formatMoney(dailyPerHour)}
-                  </span>
-                </span>
-              </div>
-            </div>
-            <div className="overflow-x-auto">
-              <table className="table-base text-sm">
-                <thead>
-                  <tr>
-                    <th>회사</th>
-                    <th>직접</th>
-                    <th>소사장</th>
-                    <th>피더</th>
-                    <th>포장철물</th>
-                    <th>총 출근</th>
-                    <th>잔업 합계</th>
-                    <th>총 부하</th>
-                    <th>예상 근무시간</th>
-                    <th>예상 생산액</th>
-                    <th>시간당생산액</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map((r) => {
-                    const totalAttn =
-                      r.totalAttendance ??
-                      r.directWorkers +
-                        (r.sajangPresent ?? 0) +
-                        r.feederPresent +
-                        (r.pojangCheolMulPresent ?? 0);
-                    const totalOTAll =
-                      r.totalOT ??
-                      r.overtimeDirect +
-                        r.overtimeFeeder +
-                        (r.pojangCheolMulOTConfirmed ?? 0);
-                    return (
-                      <tr key={`${r.date}_${r.company}`}>
-                        <td className="font-semibold">{r.company}</td>
-                        <td className="text-center">
-                          {r.directWorkers}
-                          <span className="text-[10px] text-rose-600 ml-1">
-                            ({r.overtimeDirect})
-                          </span>
-                        </td>
-                        <td className="text-center text-slate-500">
-                          {r.sajangPresent ?? 0}
-                        </td>
-                        <td className="text-center text-slate-500">
-                          {r.feederPresent}
-                          <span className="text-[10px] text-rose-600 ml-1">
-                            ({r.overtimeFeeder})
-                          </span>
-                        </td>
-                        <td className="text-center text-slate-500">
-                          {r.pojangCheolMulPresent ?? 0}
-                          {(r.pojangCheolMulOTConfirmed ?? 0) > 0 && (
-                            <span className="text-[10px] text-rose-600 ml-1">
-                              ({r.pojangCheolMulOTConfirmed})
-                            </span>
-                          )}
-                        </td>
-                        <td className="text-center font-semibold">
-                          {totalAttn}명
-                        </td>
-                        <td className="text-center text-rose-700 font-semibold">
-                          {totalOTAll}명
-                        </td>
-                        <td className="text-center">
-                          {r.totalLoad.toFixed(1)}인시
-                        </td>
-                        <td className="text-center">
-                          {r.expectedWorkHours.toFixed(0)}h
-                        </td>
-                        <td className="text-right text-emerald-700 font-semibold">
-                          {formatMoney(r.expectedProduction)}
-                        </td>
-                        <td className="text-right text-indigo-700 font-semibold">
-                          {formatMoney(r.expectedProductionPerHour)}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        );
-      })}
-
-      {/* 계산 공식 안내 */}
+      {/* 공식 안내 */}
       <div className="card border-slate-200 bg-slate-50/50">
         <h3 className="font-semibold text-slate-800 mb-2">계산 공식</h3>
         <ul className="text-xs text-slate-600 space-y-1 list-disc list-inside">
           <li>
-            <b>총 출근</b> (대림 기준) = 직접 + 소사장 + 피더 + 포장철물
-            (메인 대시보드 출근 인원 표시용)
+            <b>총인원</b> = 대림 부서 전체 직원 / <b>총출근</b> = 직접 +
+            소사장 + 피더 + 포장철물 / <b>미출근</b> = 총인원 - 총출근
           </li>
           <li>
-            <b>잔업 합계</b> = 직접 잔업 + 피더 잔업 + 포장철물 잔업(확정)
-            (표시용)
+            <b>잔업인원</b> = 직접 잔업 + 피더 잔업 + 포장철물 잔업확정
           </li>
           <li>
-            <b>포장철물 잔업확정</b>: 포장2라인 직접 잔업확정 ≥ 1명이면
-            포장철물 출근자 전원 잔업
+            <b>기본근무시간</b> = 총출근 × 8h /{" "}
+            <b>잔업근무시간</b> = 잔업인원 × 3h /{" "}
+            <b>가중근무시간</b> = 기본 + 잔업 × 1.5
           </li>
           <li>
-            <b>예상 생산액</b> = <span className="font-mono">직접 출근 ×
-            4,200,000원 + 직접 잔업인원 × 1,500,000원</span> (3h 잔업 기준,
-            소사장/피더/포장철물 미포함)
+            <b>생산액</b> = 직접인원 × 4,200,000원 + 직접 잔업인원 ×
+            1,500,000원
           </li>
           <li>
-            <b>예상 근무시간</b> = 직접 출근 × 8h + 직접 잔업인원 × 3h × 1.5
-          </li>
-          <li>
-            <b>시간당생산액</b> = 예상 생산액 ÷ 예상 근무시간
+            <b>시간당생산액</b> = 생산액 ÷ 가중근무시간
           </li>
         </ul>
       </div>
@@ -314,36 +437,279 @@ function DailyPlansContent() {
   );
 }
 
-function SummaryCard({
-  label,
+// ===== 컴포넌트들 =====
+
+function MetricCell({
   value,
-  tone,
+  unit,
+  isMoney,
 }: {
-  label: string;
-  value: string;
-  tone: "slate" | "rose" | "emerald" | "indigo";
+  value: number;
+  unit: string;
+  isMoney?: boolean;
 }) {
+  if (isMoney) return <span>{formatMoney(value)}</span>;
+  if (unit === "h") return <span>{value.toFixed(1)}h</span>;
   return (
-    <div
+    <span>
+      {value}
+      {unit}
+    </span>
+  );
+}
+
+function DiffCell({
+  plan,
+  actual,
+  unit,
+  isMoney,
+  betterUp,
+}: {
+  plan: number;
+  actual: number;
+  unit: string;
+  isMoney?: boolean;
+  betterUp?: boolean;
+}) {
+  const diff = actual - plan;
+  if (Math.abs(diff) < 1e-6) {
+    return <span className="text-slate-400">0</span>;
+  }
+  const good = betterUp ? diff > 0 : diff < 0;
+  return (
+    <span
       className={cn(
-        "rounded-lg border px-3 py-2",
-        tone === "slate" && "border-slate-200 bg-slate-50",
-        tone === "rose" && "border-rose-200 bg-rose-50",
-        tone === "emerald" && "border-emerald-200 bg-emerald-50",
-        tone === "indigo" && "border-indigo-200 bg-indigo-50"
+        "font-semibold",
+        good ? "text-emerald-700" : "text-rose-700"
       )}
     >
-      <div className="text-xs text-slate-500">{label}</div>
-      <div
-        className={cn(
-          "text-base font-bold mt-0.5",
-          tone === "slate" && "text-slate-800",
-          tone === "rose" && "text-rose-700",
-          tone === "emerald" && "text-emerald-700",
-          tone === "indigo" && "text-indigo-700"
-        )}
-      >
-        {value}
+      {diff > 0 ? "+" : ""}
+      {isMoney
+        ? formatMoney(diff)
+        : unit === "h"
+          ? `${diff.toFixed(1)}h`
+          : `${diff}${unit}`}
+    </span>
+  );
+}
+
+function DayCompanyCard({
+  company,
+  date,
+  plan,
+  actual,
+  hasPlan,
+  hasActual,
+  onActualChange,
+}: {
+  company: string;
+  date: string;
+  plan: Metrics;
+  actual: Metrics;
+  hasPlan: boolean;
+  hasActual: boolean;
+  onActualChange: (m: Metrics) => void;
+}) {
+  const [editMode, setEditMode] = useState(false);
+  const [draft, setDraft] = useState<Metrics>(actual);
+  useEffect(() => {
+    if (!editMode) setDraft(actual);
+  }, [actual, editMode]);
+
+  const handleSave = () => {
+    onActualChange(draft);
+    setEditMode(false);
+  };
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-bold text-slate-900">
+          {company}
+          <span className="ml-2 text-xs font-normal text-slate-500">
+            {date}
+            {!hasPlan && " · 계획 없음"}
+            {!hasActual && hasPlan && " · 실적 미입력"}
+          </span>
+        </h2>
+        <div className="flex gap-2">
+          {!editMode ? (
+            <button
+              type="button"
+              onClick={() => {
+                setDraft(hasActual ? actual : plan);
+                setEditMode(true);
+              }}
+              className="text-xs px-3 py-1 border border-slate-300 hover:bg-slate-50 rounded"
+            >
+              실적 {hasActual ? "수정" : "입력"}
+            </button>
+          ) : (
+            <>
+              <button
+                type="button"
+                onClick={() => setEditMode(false)}
+                className="text-xs px-3 py-1 border border-slate-300 hover:bg-slate-50 rounded"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={handleSave}
+                className="text-xs px-3 py-1 bg-blue-600 hover:bg-blue-700 text-white rounded"
+              >
+                저장
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200">
+              <th className="text-left py-2 px-2 font-semibold text-slate-600 w-1/4">
+                항목
+              </th>
+              <th className="text-right py-2 px-2 font-semibold text-blue-700">
+                계획
+              </th>
+              <th className="text-right py-2 px-2 font-semibold text-emerald-700">
+                실적
+              </th>
+              <th className="text-right py-2 px-2 font-semibold text-slate-600">
+                차이
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {ROWS.map(({ key, label, unit, isMoney }) => (
+              <tr key={key} className="border-b border-slate-100">
+                <td className="py-1.5 px-2 text-slate-700">{label}</td>
+                <td className="text-right py-1.5 px-2 text-blue-700">
+                  <MetricCell value={plan[key]} unit={unit} isMoney={isMoney} />
+                </td>
+                <td className="text-right py-1.5 px-2 text-emerald-700">
+                  {editMode ? (
+                    <input
+                      type="number"
+                      value={draft[key]}
+                      onChange={(e) =>
+                        setDraft({
+                          ...draft,
+                          [key]: Number(e.target.value) || 0,
+                        })
+                      }
+                      className="text-right w-24 border border-slate-300 rounded px-1 py-0.5 text-sm"
+                    />
+                  ) : (
+                    <MetricCell
+                      value={actual[key]}
+                      unit={unit}
+                      isMoney={isMoney}
+                    />
+                  )}
+                </td>
+                <td className="text-right py-1.5 px-2">
+                  {hasActual && !editMode ? (
+                    <DiffCell
+                      plan={plan[key]}
+                      actual={actual[key]}
+                      unit={unit}
+                      isMoney={isMoney}
+                      betterUp={
+                        key === "expectedProduction" ||
+                        key === "expectedProductionPerHour" ||
+                        key === "totalAttendance"
+                      }
+                    />
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+function MonthCompanyCard({
+  company,
+  month,
+  plan,
+  actual,
+  planDays,
+  actualDays,
+}: {
+  company: string;
+  month: string;
+  plan: Metrics;
+  actual: Metrics;
+  planDays: number;
+  actualDays: number;
+}) {
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="text-lg font-bold text-slate-900">
+          {company}
+          <span className="ml-2 text-xs font-normal text-slate-500">
+            {month} · 계획 {planDays}일 / 실적 {actualDays}일
+          </span>
+        </h2>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full text-sm">
+          <thead>
+            <tr className="border-b border-slate-200">
+              <th className="text-left py-2 px-2 font-semibold text-slate-600 w-1/4">
+                항목 (월 누계)
+              </th>
+              <th className="text-right py-2 px-2 font-semibold text-blue-700">
+                계획
+              </th>
+              <th className="text-right py-2 px-2 font-semibold text-emerald-700">
+                실적
+              </th>
+              <th className="text-right py-2 px-2 font-semibold text-slate-600">
+                차이
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {ROWS.map(({ key, label, unit, isMoney }) => (
+              <tr key={key} className="border-b border-slate-100">
+                <td className="py-1.5 px-2 text-slate-700">{label}</td>
+                <td className="text-right py-1.5 px-2 text-blue-700">
+                  <MetricCell value={plan[key]} unit={unit} isMoney={isMoney} />
+                </td>
+                <td className="text-right py-1.5 px-2 text-emerald-700">
+                  <MetricCell value={actual[key]} unit={unit} isMoney={isMoney} />
+                </td>
+                <td className="text-right py-1.5 px-2">
+                  {actualDays > 0 ? (
+                    <DiffCell
+                      plan={plan[key]}
+                      actual={actual[key]}
+                      unit={unit}
+                      isMoney={isMoney}
+                      betterUp={
+                        key === "expectedProduction" ||
+                        key === "expectedProductionPerHour" ||
+                        key === "totalAttendance"
+                      }
+                    />
+                  ) : (
+                    <span className="text-slate-400">—</span>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   );

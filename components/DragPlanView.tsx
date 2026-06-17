@@ -1155,6 +1155,15 @@ export function DragPlanView({
             idleHours: confirmedSynthLocal.result.idleHours,
           })
         : {};
+
+      // 신규 메트릭 기본값 — 회사별 extras 가 더 정확하게 덮어쓸 수 있음 (예: 대림)
+      const totalAttendanceDefault = directWorkers + feederPresentCount;
+      const overtimePeopleDefault = overtimeDirect + overtimeFeeder;
+      const standardHoursDefault = totalAttendanceDefault * 8;
+      const overtimeHoursDefault = overtimePeopleDefault * 3;
+      const weightedHoursDefault =
+        standardHoursDefault + overtimeHoursDefault * 1.5;
+
       try {
         void setDoc(doc(getDb(), "dailyPlans", docId), {
           date: dateStr,
@@ -1171,6 +1180,14 @@ export function DragPlanView({
           workHours: confirmedSynthLocal.result.workHours,
           idleHours: confirmedSynthLocal.result.idleHours,
           totalCarry: confirmedSynthLocal.result.totalCarry,
+          // 신규 메트릭 (일자별 페이지용) — 기본값, extras 가 우선
+          totalPeople: totalAttendanceDefault,
+          totalAttendance: totalAttendanceDefault,
+          totalAbsent: 0,
+          overtimePeople: overtimePeopleDefault,
+          standardHours: standardHoursDefault,
+          overtimeHours: overtimeHoursDefault,
+          weightedHours: weightedHoursDefault,
           ...extra,
         });
       } catch (e) {

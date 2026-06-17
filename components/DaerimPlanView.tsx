@@ -40,22 +40,19 @@ export function DaerimPlanView() {
   // 탭 (재배치 계획 / 수동 배치)
   const [tab, setTab] = useState<"main" | "drag">("drag");
 
-  // 대림 추가 카테고리 출근 계산 — 메인 대시보드 분류와 정확히 동일
-  // 메인 대시보드 분류 (CompanyMainDashboard.summaryMap):
-  //   1. 포장철물 키워드 매칭 → "포장철물"
-  //   2. 그 외 → e.category 그대로 (예: "대림 사장님" → 소사장 표기, "포장2라인" 등)
-  // 메인 대시보드 포장2라인 row = (e.category === "포장2라인") - feederPresentCount
+  // 대림 추가 카테고리 출근/총인원 계산 — 메인 대시보드 분류와 정확히 동일
   const daerimExtras = useMemo(() => {
     const presentCodes = new Set<string>();
     for (const a of attendance) {
       if (a.isPresent) presentCodes.add(a.empCode);
     }
+    let totalDaerimEmployees = 0; // 대림 부서 전체 (출근 + 미출근)
     let sajangPresent = 0;
     let pojangCheolMulPresent = 0;
-    let pojang2CategoryCount = 0; // e.category === "포장2라인" (피더 포함)
-    let otherCategoryCount = 0;
+    let pojang2CategoryCount = 0;
     for (const e of employees) {
       if (!e.department.includes("대림산업")) continue;
+      totalDaerimEmployees += 1;
       if (!presentCodes.has(e.empCode)) continue;
       const hasPCM =
         e.category.includes("포장철물") ||
@@ -74,19 +71,17 @@ export function DaerimPlanView() {
         pojang2CategoryCount += 1;
         continue;
       }
-      otherCategoryCount += 1;
     }
-    // 직접 = 포장2라인 category 출근 - 피더 (메인 대시보드 포장2라인 행과 동일)
     const directWorkerCount = Math.max(
       0,
       pojang2CategoryCount - feederPresentCount
     );
     return {
+      totalDaerimEmployees,
       sajangPresent,
       feederPresent: feederPresentCount,
       pojangCheolMulPresent,
       directWorkerCount,
-      otherCategoryCount,
     };
   }, [employees, attendance, feederPresentCount]);
 
@@ -229,7 +224,6 @@ export function DaerimPlanView() {
             setManualPlanPCMOvertimeConfirmed(pojangCheolMulOTConfirmed);
 
             // 예상 생산액 = 직접인원 × 4.2M + 직접 잔업인원 × 1.5M
-            // (소사장/피더/포장철물 잔업은 표시만 — 생산액 산식에 미포함)
             const expectedProduction =
               directWorkers * 4_200_000 + m.overtimeDirect * 1_500_000;
             const expectedWorkHours = directWorkers * 8 + m.overtimeDirect * 4.5;
@@ -238,9 +232,18 @@ export function DaerimPlanView() {
                 ? Math.round(expectedProduction / expectedWorkHours)
                 : 0;
 
-            const totalDirect = directWorkers + sajang + feeder + pcm;
-            const totalOT =
+            const totalAttendance =
+              directWorkers + sajang + feeder + pcm;
+            const totalAbsent = Math.max(
+              0,
+              daerimExtras.totalDaerimEmployees - totalAttendance
+            );
+            const overtimePeople =
               m.overtimeDirect + m.overtimeFeeder + pojangCheolMulOTConfirmed;
+            // 시간 메트릭
+            const standardHours = totalAttendance * 8;
+            const overtimeHours = overtimePeople * 3;
+            const weightedHours = standardHours + overtimeHours * 1.5;
 
             return {
               directWorkers,
@@ -250,8 +253,15 @@ export function DaerimPlanView() {
               expectedProduction,
               expectedWorkHours,
               expectedProductionPerHour,
-              totalAttendance: totalDirect, // 표시용 합계
-              totalOT,
+              // 신규 메트릭 (관리자 일자별 페이지용)
+              totalPeople: daerimExtras.totalDaerimEmployees,
+              totalAttendance,
+              totalAbsent,
+              overtimePeople,
+              standardHours,
+              overtimeHours,
+              weightedHours,
+              totalOT: overtimePeople, // 호환
             };
           }}
           feederGroups={[
