@@ -21,8 +21,8 @@ const NAV_ITEMS_BY_COMPANY: Record<Company, { href: string; label: string }[]> =
   다호산업: [
     { href: "/", label: "메인 대시보드" },
     { href: "/paint-line", label: "도장라인 부하" },
-    { href: "/package-line", label: "포장1라인 부하" },
     { href: "/plan", label: "재배치 계획" },
+    { href: "/package-line", label: "포장1라인 부하" },
   ],
   대림산업: [
     { href: "/", label: "메인 대시보드" },

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useHydrated } from "@/components/useComputed";
 import { EmptyState } from "@/components/EmptyState";
@@ -290,7 +291,7 @@ export function Package1LineView() {
 
   return (
     <div className="space-y-4">
-      <div className="flex items-end justify-between">
+      <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">포장1라인 부하</h1>
           <p className="text-sm text-slate-500 mt-1">
@@ -300,12 +301,20 @@ export function Package1LineView() {
             </span>
           </p>
         </div>
-        {overrideCount > 0 && (
-          <button className="btn btn-secondary" onClick={resetOverrides}>
-            <RotateCcw className="w-4 h-4" />
-            기본 배치로 초기화 ({overrideCount}건)
-          </button>
-        )}
+        <div className="flex items-center gap-3">
+          {overrideCount > 0 && (
+            <button className="btn btn-secondary" onClick={resetOverrides}>
+              <RotateCcw className="w-4 h-4" />
+              기본 배치로 초기화 ({overrideCount}건)
+            </button>
+          )}
+          <Link
+            href="/plan"
+            className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
+          >
+            재배치 계획 보기
+          </Link>
+        </div>
       </div>
 
       <AlertBanner items={alerts} />

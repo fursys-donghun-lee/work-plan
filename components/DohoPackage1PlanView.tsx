@@ -126,10 +126,10 @@ export function DohoPackage1PlanView() {
           </p>
         </div>
         <Link
-          href="/"
+          href="/package-line"
           className="text-sm text-blue-600 hover:text-blue-800 hover:underline"
         >
-          메인 대시보드로
+          상세 내역 보기
         </Link>
       </div>
 
