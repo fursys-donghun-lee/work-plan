@@ -149,6 +149,28 @@ const ROWS: {
   },
 ];
 
+// 차트 — 월별 누계실적 (생산액/시간당생산액/시간메트릭/총인원)
+const CHART_METRICS: {
+  key: keyof Metrics;
+  label: string;
+  unit: string;
+  isMoney?: boolean;
+  isAverage?: boolean; // 누계가 아니라 평균을 보여줄 메트릭 (시간당생산액)
+}[] = [
+  { key: "expectedProduction", label: "생산액", unit: "원", isMoney: true },
+  {
+    key: "expectedProductionPerHour",
+    label: "시간당생산액",
+    unit: "원",
+    isMoney: true,
+    isAverage: true,
+  },
+  { key: "standardHours", label: "기본근무시간", unit: "h" },
+  { key: "overtimeHours", label: "잔업근무시간", unit: "h" },
+  { key: "weightedHours", label: "가중근무시간", unit: "h" },
+  { key: "totalPeople", label: "총인원", unit: "명" },
+];
+
 export default function DailyPlansPage() {
   return (
     <AdminGuard>
@@ -175,6 +197,8 @@ function DailyPlansContent() {
   const [mode, setMode] = useState<"day" | "month">("day");
   const [selectedDate, setSelectedDate] = useState(todayStr);
   const [selectedMonth, setSelectedMonth] = useState(thisMonthStr);
+  const [chartMetric, setChartMetric] =
+    useState<keyof Metrics>("expectedProduction");
 
   // Firestore subscribe — plans & actuals
   useEffect(() => {
@@ -271,6 +295,50 @@ function DailyPlansContent() {
     return Array.from(s).sort().reverse();
   }, [plans, actuals]);
 
+  // 월별 차트 데이터 — 모든 회사 실적을 월별로 누계
+  const chartData = useMemo(() => {
+    // (months, totals[chartMetric]) — 실적이 있는 모든 월
+    const byMonth = new Map<
+      string,
+      { sum: number; weightedSum: number; productionSum: number; count: number }
+    >();
+    for (const a of actuals) {
+      const month = a.date.substring(0, 7);
+      if (!byMonth.has(month)) {
+        byMonth.set(month, {
+          sum: 0,
+          weightedSum: 0,
+          productionSum: 0,
+          count: 0,
+        });
+      }
+      const b = byMonth.get(month)!;
+      const m = actualToMetrics(a);
+      b.sum += m[chartMetric] ?? 0;
+      b.weightedSum += m.weightedHours ?? 0;
+      b.productionSum += m.expectedProduction ?? 0;
+      b.count += 1;
+    }
+    // 최근 12개월만 (오름차순)
+    const months = Array.from(byMonth.keys()).sort();
+    const recent = months.slice(-12);
+    const meta = CHART_METRICS.find((m) => m.key === chartMetric);
+    return recent.map((month) => {
+      const b = byMonth.get(month)!;
+      // 시간당생산액은 합산이 아니라 (총생산액 / 총가중시간) 재계산
+      let value: number;
+      if (meta?.isAverage) {
+        value =
+          b.weightedSum > 0
+            ? Math.round(b.productionSum / b.weightedSum)
+            : 0;
+      } else {
+        value = b.sum;
+      }
+      return { month, value };
+    });
+  }, [actuals, chartMetric]);
+
   // 실적 편집 핸들러
   const updateActual = async (date: string, company: string, m: Metrics) => {
     if (!isFirebaseConfigured()) return;
@@ -305,6 +373,13 @@ function DailyPlansContent() {
           계획(확정 시점) 과 실적(수동 입력) 비교 — 관리자 전용
         </p>
       </div>
+
+      {/* 월별 누계실적 차트 */}
+      <MonthlyChart
+        data={chartData}
+        chartMetric={chartMetric}
+        setChartMetric={setChartMetric}
+      />
 
       {/* 모드 토글 */}
       <div className="flex items-center gap-2">
@@ -438,6 +513,172 @@ function DailyPlansContent() {
 }
 
 // ===== 컴포넌트들 =====
+
+function MonthlyChart({
+  data,
+  chartMetric,
+  setChartMetric,
+}: {
+  data: { month: string; value: number }[];
+  chartMetric: keyof Metrics;
+  setChartMetric: (k: keyof Metrics) => void;
+}) {
+  const meta = CHART_METRICS.find((m) => m.key === chartMetric)!;
+  const maxValue = Math.max(1, ...data.map((d) => d.value));
+  const niceMax = niceCeil(maxValue);
+
+  // SVG 좌표계
+  const PAD_L = 70;
+  const PAD_R = 20;
+  const PAD_T = 20;
+  const PAD_B = 40;
+  const W = 780;
+  const H = 280;
+  const innerW = W - PAD_L - PAD_R;
+  const innerH = H - PAD_T - PAD_B;
+
+  const n = data.length;
+  const barGap = 8;
+  const barW = n > 0 ? (innerW - barGap * (n - 1)) / n : 0;
+
+  // 5단계 y-grid
+  const ticks = 4;
+  const tickValues = Array.from({ length: ticks + 1 }, (_, i) =>
+    Math.round((niceMax * i) / ticks)
+  );
+
+  const formatValue = (v: number) => {
+    if (meta.isMoney) {
+      if (v >= 100_000_000) return (v / 100_000_000).toFixed(1) + "억";
+      if (v >= 10_000) return (v / 10_000).toFixed(0) + "만";
+      return v.toLocaleString("ko-KR");
+    }
+    if (meta.unit === "h") return v.toFixed(0) + "h";
+    return v + meta.unit;
+  };
+
+  return (
+    <div className="card">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
+        <h2 className="font-bold text-slate-900">월별 누계실적</h2>
+        <div className="flex items-center gap-2">
+          <span className="text-xs text-slate-500">보고 싶은 값</span>
+          <select
+            value={chartMetric}
+            onChange={(e) => setChartMetric(e.target.value as keyof Metrics)}
+            className="text-sm border border-slate-300 rounded px-2 py-1 bg-white"
+          >
+            {CHART_METRICS.map((m) => (
+              <option key={m.key} value={m.key}>
+                {m.label}
+                {m.isAverage ? " (월 평균)" : ""}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      {data.length === 0 ? (
+        <div className="text-center py-12 text-slate-400 text-sm">
+          실적이 입력된 월이 없습니다. 일자 모드에서 [실적 입력] 으로 입력하면
+          여기에 표시됩니다.
+        </div>
+      ) : (
+        <div className="overflow-x-auto">
+          <svg
+            viewBox={`0 0 ${W} ${H}`}
+            className="w-full h-auto"
+            style={{ maxWidth: "100%" }}
+          >
+            {/* Y-axis grid + labels */}
+            {tickValues.map((v, i) => {
+              const y = PAD_T + innerH - (innerH * i) / ticks;
+              return (
+                <g key={i}>
+                  <line
+                    x1={PAD_L}
+                    x2={W - PAD_R}
+                    y1={y}
+                    y2={y}
+                    stroke="#e2e8f0"
+                    strokeDasharray={i === 0 ? "" : "3,3"}
+                  />
+                  <text
+                    x={PAD_L - 6}
+                    y={y + 4}
+                    textAnchor="end"
+                    fontSize="10"
+                    fill="#64748b"
+                  >
+                    {formatValue(v)}
+                  </text>
+                </g>
+              );
+            })}
+
+            {/* Bars */}
+            {data.map((d, i) => {
+              const x = PAD_L + i * (barW + barGap);
+              const h = niceMax > 0 ? (innerH * d.value) / niceMax : 0;
+              const y = PAD_T + innerH - h;
+              return (
+                <g key={d.month}>
+                  <rect
+                    x={x}
+                    y={y}
+                    width={barW}
+                    height={h}
+                    fill="#2563eb"
+                    rx={2}
+                  />
+                  <text
+                    x={x + barW / 2}
+                    y={y - 4}
+                    textAnchor="middle"
+                    fontSize="10"
+                    fill="#1e293b"
+                    fontWeight={600}
+                  >
+                    {formatValue(d.value)}
+                  </text>
+                  <text
+                    x={x + barW / 2}
+                    y={H - PAD_B + 16}
+                    textAnchor="middle"
+                    fontSize="11"
+                    fill="#475569"
+                  >
+                    {d.month}
+                  </text>
+                </g>
+              );
+            })}
+          </svg>
+        </div>
+      )}
+      <p className="text-xs text-slate-400 mt-2">
+        {meta.isAverage
+          ? "※ 시간당생산액은 월 합산이 아니라 (총 생산액 ÷ 총 가중근무시간) 으로 재계산"
+          : "※ 각 월에 입력된 모든 회사 실적의 합계"}
+      </p>
+    </div>
+  );
+}
+
+// 차트 y-axis 깔끔한 최대값 (1·2·2.5·5 × 10ⁿ)
+function niceCeil(n: number): number {
+  if (n <= 0) return 1;
+  const exp = Math.floor(Math.log10(n));
+  const base = Math.pow(10, exp);
+  const m = n / base;
+  let nice: number;
+  if (m <= 1) nice = 1;
+  else if (m <= 2) nice = 2;
+  else if (m <= 2.5) nice = 2.5;
+  else if (m <= 5) nice = 5;
+  else nice = 10;
+  return nice * base;
+}
 
 function MetricCell({
   value,
