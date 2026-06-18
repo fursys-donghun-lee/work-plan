@@ -171,7 +171,7 @@ export function TempCellEditor({
         <p className="text-sm text-slate-500">
           아직 등록된 임시 셀이 없습니다. 위 "임시 셀 추가" 버튼으로 생성하세요.
           (예: MA-03 이월 부하가 클 때, 잔업시간(18:00~21:00) 동안 2명을
-          배치해 6인시 추가 처리)
+          배치해 6H 추가 처리)
         </p>
       ) : (
         <div className="space-y-3">
@@ -224,7 +224,7 @@ export function TempCellEditor({
                         <option key={t.name} value={t.name}>
                           {t.name}
                           {t.carryHours > 0.5
-                            ? ` (이월 ${t.carryHours.toFixed(1)}인시)`
+                            ? ` (이월 ${t.carryHours.toFixed(1)}H)`
                             : ""}
                         </option>
                       ))}
@@ -338,7 +338,7 @@ export function TempCellEditor({
                   <span>
                     처리 부하:{" "}
                     <b className="text-emerald-700">
-                      {effectiveLoad.toFixed(1)}인시
+                      {effectiveLoad.toFixed(1)}H
                     </b>{" "}
                     {peopleCount === 1 && "(1인 60% 적용)"}
                   </span>

@@ -51,8 +51,8 @@ export function ImprovementSummary({
       label: "잔업 시간",
       base: rBasic.overtimePersonHours,
       real: rReal.overtimePersonHours,
-      fmtVal: (v) => `${v.toFixed(1)}인시`,
-      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(1)}인시`,
+      fmtVal: (v) => `${v.toFixed(1)}H`,
+      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(1)}H`,
       betterUp: false,
     },
     {
