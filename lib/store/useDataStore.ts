@@ -116,6 +116,7 @@ interface DataState {
   addLineBase: (item: LineBaseHeadcount) => void;
   deleteLineBase: (index: number) => void;
   setAttendance: (data: AttendanceRecord[], workDate: string, meta: UploadMeta) => void;
+  clockInEmployee: (empCode: string, name: string) => void;
   setWorkDate: (workDate: string) => void;
   setLoadPlan: (data: LoadPlanRow[], meta: UploadMeta) => void;
   setPaintPlan: (data: PaintPlanRow[], meta: UploadMeta) => void;
@@ -279,6 +280,37 @@ export const useDataStore = create<DataState>()(
       // setAttendance: 파일의 workDate 는 무시 (오늘 날짜는 SessionState 가 관리)
       setAttendance: (data, _workDate, meta) =>
         set({ attendance: data, attendanceMeta: meta }),
+      // 출근 체크인 — 직원이 이름을 클릭한 시각으로 출근 처리
+      clockInEmployee: (empCode, name) =>
+        set((state) => {
+          const now = new Date();
+          const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+          const idx = state.attendance.findIndex((a) => a.empCode === empCode);
+          if (idx >= 0) {
+            // 기존 레코드 갱신 (이미 출근 표시돼 있어도 시간 다시 찍음)
+            const next = [...state.attendance];
+            next[idx] = {
+              ...next[idx],
+              startTime: hhmm,
+              isPresent: true,
+              name: next[idx].name || name,
+            };
+            return { attendance: next };
+          }
+          // 새 레코드 추가
+          return {
+            attendance: [
+              ...state.attendance,
+              {
+                empCode,
+                name,
+                workDate: state.workDate,
+                startTime: hhmm,
+                isPresent: true,
+              },
+            ],
+          };
+        }),
       setWorkDate: (workDate) => set({ workDate }),
       setLoadPlan: (data, meta) => set({ loadPlan: data, loadPlanMeta: meta }),
       setPaintPlan: (data, meta) => set({ paintPlan: data, paintPlanMeta: meta }),
