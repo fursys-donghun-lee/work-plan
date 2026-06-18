@@ -232,72 +232,75 @@ export function DaerimClockInView() {
         </div>
       </div>
 
-      {/* 출근 전 — 소사장/피더/작업자 3그룹, 이름 세로 나열 */}
-      {notClockedInTotal > 0 && (
-        <div className="card border-amber-200 bg-amber-50/40">
-          <h2 className="font-semibold text-slate-900 mb-3">
-            출근 전{" "}
-            <span className="text-xs font-normal text-amber-700">
-              ({notClockedInTotal}명 — 본인 이름을 눌러서 출근 처리)
-            </span>
-          </h2>
-          <div className="space-y-2">
-            {(["소사장", "피더", "작업자"] as const).map((grp) => (
-              <NotClockedInGroup
-                key={grp}
-                label={grp}
-                workers={notClockedInGroups[grp]}
-                onClockIn={clockInEmployee}
-              />
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 본문 — 왼쪽: 라인 배치 그리드 / 오른쪽: 출근 전 세로 패널 */}
+      <div className="flex gap-4 items-start">
+        {/* 왼쪽: 라인 그리드 (4행) — 출근한 인원만 표시 */}
+        <div className="flex-1 min-w-0 space-y-3">
+          {LINE_GRID.map((row, ri) => (
+            <div
+              key={ri}
+              className="grid gap-3"
+              style={{
+                gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))`,
+              }}
+            >
+              {row.map((line) => (
+                <LineCard
+                  key={line}
+                  line={line}
+                  workers={presentBySlot.get(line) ?? []}
+                  attMap={attMap}
+                  onClockIn={clockInEmployee}
+                />
+              ))}
+            </div>
+          ))}
 
-      {/* 라인 그리드 (4행) — 출근한 인원만 표시 */}
-      <div className="space-y-3">
-        {LINE_GRID.map((row, ri) => (
-          <div
-            key={ri}
-            className="grid gap-3"
-            style={{
-              gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))`,
-            }}
-          >
-            {row.map((line) => (
-              <LineCard
-                key={line}
-                line={line}
-                workers={presentBySlot.get(line) ?? []}
-                attMap={attMap}
-                onClockIn={clockInEmployee}
-              />
-            ))}
+          {/* 기타 — 출근했지만 13개 라인에 속하지 않는 직원 (사장님 등) */}
+          {presentOthers.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <h2 className="font-semibold text-slate-900 text-sm mb-2">
+                기타{" "}
+                <span className="text-xs font-normal text-slate-500">
+                  (사장님 · 라인 미지정)
+                </span>
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {presentOthers.map((e) => (
+                  <WorkerChip
+                    key={e.empCode}
+                    employee={e}
+                    attendance={attMap.get(e.empCode)}
+                    onClockIn={clockInEmployee}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* 오른쪽: 출근 전 그룹 세로 패널 */}
+        {notClockedInTotal > 0 && (
+          <div className="w-60 flex-shrink-0 card border-amber-200 bg-amber-50/40 self-stretch">
+            <h2 className="font-semibold text-slate-900 mb-3 text-sm">
+              출근 전{" "}
+              <span className="text-xs font-normal text-amber-700">
+                ({notClockedInTotal}명)
+              </span>
+            </h2>
+            <div className="space-y-4">
+              {(["소사장", "피더", "작업자"] as const).map((grp) => (
+                <NotClockedInGroup
+                  key={grp}
+                  label={grp}
+                  workers={notClockedInGroups[grp]}
+                  onClockIn={clockInEmployee}
+                />
+              ))}
+            </div>
           </div>
-        ))}
+        )}
       </div>
-
-      {/* 기타 — 출근했지만 13개 라인에 속하지 않는 직원 (사장님 등) */}
-      {presentOthers.length > 0 && (
-        <div className="card">
-          <h2 className="font-semibold text-slate-900 mb-3">
-            기타{" "}
-            <span className="text-xs font-normal text-slate-500">
-              (사장님 · 라인 미지정)
-            </span>
-          </h2>
-          <div className="flex flex-wrap gap-2">
-            {presentOthers.map((e) => (
-              <WorkerChip
-                key={e.empCode}
-                employee={e}
-                attendance={attMap.get(e.empCode)}
-                onClockIn={clockInEmployee}
-              />
-            ))}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
@@ -312,25 +315,23 @@ function NotClockedInGroup({
   onClockIn: (empCode: string, name: string) => void;
 }) {
   return (
-    <div className="flex items-start gap-4 py-2 border-b border-amber-200 last:border-b-0">
-      {/* 그룹 라벨 — 왼쪽 고정폭 */}
-      <div className="w-20 flex-shrink-0 font-bold text-slate-800 text-sm pt-1">
-        {label}
-        <span className="ml-1 text-xs font-normal text-slate-500">
+    <div>
+      <div className="font-bold text-slate-800 text-sm mb-2 border-b border-amber-300 pb-1 flex items-center justify-between">
+        <span>{label}</span>
+        <span className="text-xs font-normal text-slate-500">
           {workers.length}명
         </span>
       </div>
-      {/* 이름 목록 — 오른쪽, 세로 나열 */}
-      <div className="flex-1 flex flex-col gap-1.5 items-end">
+      <div className="flex flex-col gap-1.5">
         {workers.length === 0 ? (
-          <span className="text-xs text-slate-400 italic">없음</span>
+          <span className="text-xs text-slate-400 italic px-2">없음</span>
         ) : (
           workers.map((e) => (
             <button
               key={e.empCode}
               type="button"
               onClick={() => onClockIn(e.empCode, e.name)}
-              className="px-3 py-1.5 rounded-md text-sm font-semibold border bg-white border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors min-w-[100px] text-right"
+              className="w-full px-3 py-1.5 rounded-md text-sm font-semibold border bg-white border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors text-center"
               title={`${e.name} · 눌러서 출근`}
             >
               {e.name}
