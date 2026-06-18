@@ -18,8 +18,29 @@ const LINE_GRID: string[][] = [
 // 그리드 라인 (Set) — 포장철물 포함
 const GRID_LINES = new Set<string>(LINE_GRID.flat());
 
-// 직원의 슬롯 결정 — 포장철물 키워드는 baseLocation 우선
-function slotFor(category: string, department: string, baseLocation: string, position: string): string {
+// 재배치 계획에서 자동포장라인으로 묶이는 packagePosition.position 값들
+//   (useDaerimRealloc 의 AUTO_GROUP_NAMES 와 동일)
+const AUTO_PACKAGE_POSITIONS = new Set<string>([
+  "PA-01",
+  "PA-02",
+  "자동포장(파이프)",
+]);
+
+// 직원의 슬롯 결정 — 우선순위:
+//   1) 포장철물 키워드 매칭 → 포장철물
+//   2) 기준자료 포장라인 기본근무위치(packagePosition.position) 매핑
+//      · PA-01·PA-02·자동포장(파이프) → 자동포장라인
+//      · 그 외 PA/MM/MA → 해당 슬롯
+//   3) employee.baseLocation fallback
+//   4) 기타
+function slotFor(
+  empCode: string,
+  category: string,
+  department: string,
+  baseLocation: string,
+  position: string,
+  packagePos: Map<string, string>
+): string {
   if (
     category.includes("포장철물") ||
     department.includes("포장철물") ||
@@ -28,8 +49,16 @@ function slotFor(category: string, department: string, baseLocation: string, pos
   ) {
     return "포장철물";
   }
+
+  const pkgPos = packagePos.get(empCode);
+  if (pkgPos) {
+    if (AUTO_PACKAGE_POSITIONS.has(pkgPos)) return "자동포장라인";
+    if (GRID_LINES.has(pkgPos)) return pkgPos;
+  }
+
   const loc = (baseLocation || "").trim();
   if (GRID_LINES.has(loc)) return loc;
+
   return "기타";
 }
 
@@ -38,6 +67,7 @@ export function DaerimClockInView() {
   const employees = useDataStore((s) => s.employees);
   const attendance = useDataStore((s) => s.attendance);
   const workDate = useDataStore((s) => s.workDate);
+  const packagePosition = useDataStore((s) => s.packagePosition);
   const clockInEmployee = useDataStore((s) => s.clockInEmployee);
 
   // 대림 직원 추출 + 출근 lookup + 슬롯 매핑
@@ -45,6 +75,12 @@ export function DaerimClockInView() {
     const daerimEmps = employees.filter((e) =>
       e.department.includes("대림산업")
     );
+
+    // 기준자료 포장라인 기본근무위치 → empCode → position 매핑
+    const pkgPosMap = new Map<string, string>();
+    for (const p of packagePosition) {
+      if (p.empCode) pkgPosMap.set(p.empCode, p.position || "");
+    }
 
     const m = new Map<string, AttendanceRecord>();
     for (const a of attendance) m.set(a.empCode, a);
@@ -54,7 +90,14 @@ export function DaerimClockInView() {
     const notClockedIn: Employee[] = [];
 
     for (const e of daerimEmps) {
-      const slot = slotFor(e.category, e.department, e.baseLocation, e.position);
+      const slot = slotFor(
+        e.empCode,
+        e.category,
+        e.department,
+        e.baseLocation,
+        e.position,
+        pkgPosMap
+      );
       const isPresent = !!m.get(e.empCode)?.isPresent;
       if (!isPresent) {
         notClockedIn.push(e);
@@ -84,7 +127,7 @@ export function DaerimClockInView() {
       attMap: m,
       stats: { total, present, absent: notClockedIn.length },
     };
-  }, [employees, attendance]);
+  }, [employees, attendance, packagePosition]);
 
   if (!hydrated) return null;
 
