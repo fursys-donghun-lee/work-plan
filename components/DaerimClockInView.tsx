@@ -6,6 +6,23 @@ import { useHydrated } from "@/components/useComputed";
 import { EmptyState } from "@/components/EmptyState";
 import { cn } from "@/lib/utils";
 import type { Employee, AttendanceRecord } from "@/lib/types";
+import { PACKAGE2_FEEDER_WORKERS } from "@/lib/types";
+
+const FEEDER_NAME_SET = new Set<string>(PACKAGE2_FEEDER_WORKERS);
+
+// 출근 전 그룹화 — 소사장 / 피더 / 작업자(포장2라인 + 포장철물)
+function classifyGroup(e: Employee): "소사장" | "피더" | "작업자" | null {
+  if (e.category.includes("사장")) return "소사장";
+  if (FEEDER_NAME_SET.has(e.name)) return "피더";
+  const hasPCM =
+    e.category.includes("포장철물") ||
+    e.department.includes("포장철물") ||
+    e.baseLocation.includes("포장철물") ||
+    e.position.includes("포장철물");
+  if (hasPCM) return "작업자";
+  if (e.category === "포장2라인") return "작업자";
+  return null;
+}
 
 // 라인 배치 — 사용자 지정 4행 레이아웃
 const LINE_GRID: string[][] = [
@@ -70,8 +87,15 @@ export function DaerimClockInView() {
   const packagePosition = useDataStore((s) => s.packagePosition);
   const clockInEmployee = useDataStore((s) => s.clockInEmployee);
 
-  // 대림 직원 추출 + 출근 lookup + 슬롯 매핑
-  const { presentBySlot, presentOthers, notClockedIn, attMap, stats } = useMemo(() => {
+  // 대림 직원 추출 + 출근 lookup + 슬롯 매핑 + 미출근 그룹화
+  const {
+    presentBySlot,
+    presentOthers,
+    notClockedInGroups,
+    notClockedInTotal,
+    attMap,
+    stats,
+  } = useMemo(() => {
     const daerimEmps = employees.filter((e) =>
       e.department.includes("대림산업")
     );
@@ -87,7 +111,9 @@ export function DaerimClockInView() {
 
     const presentBySlot = new Map<string, Employee[]>();
     const presentOthers: Employee[] = [];
-    const notClockedIn: Employee[] = [];
+    const sajangNot: Employee[] = [];
+    const feederNot: Employee[] = [];
+    const workerNot: Employee[] = [];
 
     for (const e of daerimEmps) {
       const slot = slotFor(
@@ -100,7 +126,11 @@ export function DaerimClockInView() {
       );
       const isPresent = !!m.get(e.empCode)?.isPresent;
       if (!isPresent) {
-        notClockedIn.push(e);
+        const grp = classifyGroup(e);
+        if (grp === "소사장") sajangNot.push(e);
+        else if (grp === "피더") feederNot.push(e);
+        else if (grp === "작업자") workerNot.push(e);
+        // 그 외(매칭 안 됨)는 미출근 표시 안 함 (출근 전 카드에는 안 나옴)
         continue;
       }
       if (slot === "기타") {
@@ -115,17 +145,21 @@ export function DaerimClockInView() {
     const cmp = (a: Employee, b: Employee) => a.name.localeCompare(b.name, "ko");
     for (const arr of presentBySlot.values()) arr.sort(cmp);
     presentOthers.sort(cmp);
-    notClockedIn.sort(cmp);
+    sajangNot.sort(cmp);
+    feederNot.sort(cmp);
+    workerNot.sort(cmp);
 
+    const notClockedInTotal = sajangNot.length + feederNot.length + workerNot.length;
     const total = daerimEmps.length;
-    const present = total - notClockedIn.length;
+    const present = total - notClockedInTotal;
 
     return {
       presentBySlot,
       presentOthers,
-      notClockedIn,
+      notClockedInGroups: { 소사장: sajangNot, 피더: feederNot, 작업자: workerNot },
+      notClockedInTotal,
       attMap: m,
-      stats: { total, present, absent: notClockedIn.length },
+      stats: { total, present, absent: notClockedInTotal },
     };
   }, [employees, attendance, packagePosition]);
 
@@ -198,21 +232,21 @@ export function DaerimClockInView() {
         </div>
       </div>
 
-      {/* 출근 전 — 본인 이름 눌러서 출근 처리 */}
-      {notClockedIn.length > 0 && (
+      {/* 출근 전 — 소사장/피더/작업자 3그룹, 이름 세로 나열 */}
+      {notClockedInTotal > 0 && (
         <div className="card border-amber-200 bg-amber-50/40">
           <h2 className="font-semibold text-slate-900 mb-3">
             출근 전{" "}
             <span className="text-xs font-normal text-amber-700">
-              ({notClockedIn.length}명 — 본인 이름을 눌러서 출근 처리)
+              ({notClockedInTotal}명 — 본인 이름을 눌러서 출근 처리)
             </span>
           </h2>
-          <div className="flex flex-wrap gap-2">
-            {notClockedIn.map((e) => (
-              <WorkerChip
-                key={e.empCode}
-                employee={e}
-                attendance={undefined}
+          <div className="space-y-2">
+            {(["소사장", "피더", "작업자"] as const).map((grp) => (
+              <NotClockedInGroup
+                key={grp}
+                label={grp}
+                workers={notClockedInGroups[grp]}
                 onClockIn={clockInEmployee}
               />
             ))}
@@ -264,6 +298,46 @@ export function DaerimClockInView() {
           </div>
         </div>
       )}
+    </div>
+  );
+}
+
+function NotClockedInGroup({
+  label,
+  workers,
+  onClockIn,
+}: {
+  label: string;
+  workers: Employee[];
+  onClockIn: (empCode: string, name: string) => void;
+}) {
+  return (
+    <div className="flex items-start gap-4 py-2 border-b border-amber-200 last:border-b-0">
+      {/* 그룹 라벨 — 왼쪽 고정폭 */}
+      <div className="w-20 flex-shrink-0 font-bold text-slate-800 text-sm pt-1">
+        {label}
+        <span className="ml-1 text-xs font-normal text-slate-500">
+          {workers.length}명
+        </span>
+      </div>
+      {/* 이름 목록 — 오른쪽, 세로 나열 */}
+      <div className="flex-1 flex flex-col gap-1.5 items-end">
+        {workers.length === 0 ? (
+          <span className="text-xs text-slate-400 italic">없음</span>
+        ) : (
+          workers.map((e) => (
+            <button
+              key={e.empCode}
+              type="button"
+              onClick={() => onClockIn(e.empCode, e.name)}
+              className="px-3 py-1.5 rounded-md text-sm font-semibold border bg-white border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors min-w-[100px] text-right"
+              title={`${e.name} · 눌러서 출근`}
+            >
+              {e.name}
+            </button>
+          ))
+        )}
+      </div>
     </div>
   );
 }
