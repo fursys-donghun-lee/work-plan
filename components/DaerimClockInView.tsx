@@ -11,12 +11,27 @@ import type { Employee, AttendanceRecord } from "@/lib/types";
 const LINE_GRID: string[][] = [
   ["PA-01", "PA-02", "PA-03", "PA-04", "PA-05"],
   ["MM-01", "MM-02", "MM-03", "MM-04"],
-  ["PA-06", "PA-07", "자동포장라인"],
+  ["PA-06", "PA-07", "자동포장라인", "포장철물"],
   ["MA-01", "MA-02", "MA-03", "MM-05"],
 ];
 
-// 그리드 라인에 속하는 13개 라인 (Set)
+// 그리드 라인 (Set) — 포장철물 포함
 const GRID_LINES = new Set<string>(LINE_GRID.flat());
+
+// 직원의 슬롯 결정 — 포장철물 키워드는 baseLocation 우선
+function slotFor(category: string, department: string, baseLocation: string, position: string): string {
+  if (
+    category.includes("포장철물") ||
+    department.includes("포장철물") ||
+    baseLocation.includes("포장철물") ||
+    position.includes("포장철물")
+  ) {
+    return "포장철물";
+  }
+  const loc = (baseLocation || "").trim();
+  if (GRID_LINES.has(loc)) return loc;
+  return "기타";
+}
 
 export function DaerimClockInView() {
   const hydrated = useHydrated();
@@ -25,48 +40,51 @@ export function DaerimClockInView() {
   const workDate = useDataStore((s) => s.workDate);
   const clockInEmployee = useDataStore((s) => s.clockInEmployee);
 
-  // 대림 직원 추출 + 출근 lookup
-  const { byLocation, otherWorkers, attMap } = useMemo(() => {
+  // 대림 직원 추출 + 출근 lookup + 슬롯 매핑
+  const { presentBySlot, presentOthers, notClockedIn, attMap, stats } = useMemo(() => {
     const daerimEmps = employees.filter((e) =>
       e.department.includes("대림산업")
     );
-    const byLoc = new Map<string, Employee[]>();
-    const others: Employee[] = [];
-    for (const e of daerimEmps) {
-      const loc = (e.baseLocation || "").trim();
-      if (GRID_LINES.has(loc)) {
-        if (!byLoc.has(loc)) byLoc.set(loc, []);
-        byLoc.get(loc)!.push(e);
-      } else {
-        others.push(e);
-      }
-    }
-    // 이름 가나다순
-    for (const arr of byLoc.values()) arr.sort((a, b) => a.name.localeCompare(b.name, "ko"));
-    others.sort((a, b) => a.name.localeCompare(b.name, "ko"));
 
     const m = new Map<string, AttendanceRecord>();
     for (const a of attendance) m.set(a.empCode, a);
 
-    return { byLocation: byLoc, otherWorkers: others, attMap: m };
-  }, [employees, attendance]);
+    const presentBySlot = new Map<string, Employee[]>();
+    const presentOthers: Employee[] = [];
+    const notClockedIn: Employee[] = [];
 
-  // 출근 통계
-  const stats = useMemo(() => {
-    let total = 0;
-    let present = 0;
-    for (const arr of byLocation.values()) {
-      for (const e of arr) {
-        total += 1;
-        if (attMap.get(e.empCode)?.isPresent) present += 1;
+    for (const e of daerimEmps) {
+      const slot = slotFor(e.category, e.department, e.baseLocation, e.position);
+      const isPresent = !!m.get(e.empCode)?.isPresent;
+      if (!isPresent) {
+        notClockedIn.push(e);
+        continue;
+      }
+      if (slot === "기타") {
+        presentOthers.push(e);
+      } else {
+        if (!presentBySlot.has(slot)) presentBySlot.set(slot, []);
+        presentBySlot.get(slot)!.push(e);
       }
     }
-    for (const e of otherWorkers) {
-      total += 1;
-      if (attMap.get(e.empCode)?.isPresent) present += 1;
-    }
-    return { total, present, absent: total - present };
-  }, [byLocation, otherWorkers, attMap]);
+
+    // 정렬 — 이름 가나다순
+    const cmp = (a: Employee, b: Employee) => a.name.localeCompare(b.name, "ko");
+    for (const arr of presentBySlot.values()) arr.sort(cmp);
+    presentOthers.sort(cmp);
+    notClockedIn.sort(cmp);
+
+    const total = daerimEmps.length;
+    const present = total - notClockedIn.length;
+
+    return {
+      presentBySlot,
+      presentOthers,
+      notClockedIn,
+      attMap: m,
+      stats: { total, present, absent: notClockedIn.length },
+    };
+  }, [employees, attendance]);
 
   if (!hydrated) return null;
 
@@ -137,7 +155,29 @@ export function DaerimClockInView() {
         </div>
       </div>
 
-      {/* 라인 그리드 (4행) */}
+      {/* 출근 전 — 본인 이름 눌러서 출근 처리 */}
+      {notClockedIn.length > 0 && (
+        <div className="card border-amber-200 bg-amber-50/40">
+          <h2 className="font-semibold text-slate-900 mb-3">
+            출근 전{" "}
+            <span className="text-xs font-normal text-amber-700">
+              ({notClockedIn.length}명 — 본인 이름을 눌러서 출근 처리)
+            </span>
+          </h2>
+          <div className="flex flex-wrap gap-2">
+            {notClockedIn.map((e) => (
+              <WorkerChip
+                key={e.empCode}
+                employee={e}
+                attendance={undefined}
+                onClockIn={clockInEmployee}
+              />
+            ))}
+          </div>
+        </div>
+      )}
+
+      {/* 라인 그리드 (4행) — 출근한 인원만 표시 */}
       <div className="space-y-3">
         {LINE_GRID.map((row, ri) => (
           <div
@@ -151,7 +191,7 @@ export function DaerimClockInView() {
               <LineCard
                 key={line}
                 line={line}
-                workers={byLocation.get(line) ?? []}
+                workers={presentBySlot.get(line) ?? []}
                 attMap={attMap}
                 onClockIn={clockInEmployee}
               />
@@ -160,17 +200,17 @@ export function DaerimClockInView() {
         ))}
       </div>
 
-      {/* 기타 — 사장님 / 포장철물 / 라인 없는 직원 */}
-      {otherWorkers.length > 0 && (
+      {/* 기타 — 출근했지만 13개 라인에 속하지 않는 직원 (사장님 등) */}
+      {presentOthers.length > 0 && (
         <div className="card">
           <h2 className="font-semibold text-slate-900 mb-3">
             기타{" "}
             <span className="text-xs font-normal text-slate-500">
-              (사장님 · 포장철물 · 라인 미지정)
+              (사장님 · 라인 미지정)
             </span>
           </h2>
           <div className="flex flex-wrap gap-2">
-            {otherWorkers.map((e) => (
+            {presentOthers.map((e) => (
               <WorkerChip
                 key={e.empCode}
                 employee={e}
@@ -196,22 +236,25 @@ function LineCard({
   attMap: Map<string, AttendanceRecord>;
   onClockIn: (empCode: string, name: string) => void;
 }) {
-  const presentCount = workers.filter(
-    (e) => attMap.get(e.empCode)?.isPresent
-  ).length;
+  // workers 는 이미 출근한 직원만 들어옴
   return (
     <div className="rounded-lg border border-slate-200 bg-white p-3 min-h-[120px]">
       <div className="flex items-center justify-between mb-2">
         <div className="font-bold text-slate-800 text-sm">
           {line === "자동포장라인" ? "자동포장" : line}
         </div>
-        <div className="text-xs text-slate-500">
-          {presentCount}/{workers.length}
+        <div
+          className={cn(
+            "text-xs font-semibold",
+            workers.length > 0 ? "text-emerald-700" : "text-slate-400"
+          )}
+        >
+          {workers.length}명
         </div>
       </div>
       <div className="flex flex-wrap gap-1.5">
         {workers.length === 0 ? (
-          <div className="text-xs text-slate-400 italic">배정 인원 없음</div>
+          <div className="text-xs text-slate-400 italic">대기 중</div>
         ) : (
           workers.map((e) => (
             <WorkerChip
