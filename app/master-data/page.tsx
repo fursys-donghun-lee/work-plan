@@ -174,7 +174,7 @@ export default function MasterDataPage() {
         />
         <FileUploadCard
           title="라인 기준인원"
-          description="라인별 기준 인원수. 부하시간 × 인원으로 H 환산."
+          description="라인별 기준 인원수. 부하시간 × 인원으로 시간 환산."
           uploaded={lineBase.length > 0}
           fileName={lineBaseMeta?.fileName}
           uploadedAt={lineBaseMeta?.uploadedAt}

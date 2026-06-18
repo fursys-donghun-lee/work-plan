@@ -495,8 +495,8 @@ function DailyPlansContent() {
             <b>잔업인원</b> = 직접 잔업 + 피더 잔업 + 포장철물 잔업확정
           </li>
           <li>
-            <b>기본근무시간</b> = 총출근 × 8h /{" "}
-            <b>잔업근무시간</b> = 잔업인원 × 3h /{" "}
+            <b>기본근무시간</b> = 총출근 × 8시간 /{" "}
+            <b>잔업근무시간</b> = 잔업인원 × 3시간 /{" "}
             <b>가중근무시간</b> = 기본 + 잔업 × 1.5
           </li>
           <li>
@@ -553,7 +553,7 @@ function MonthlyChart({
       if (v >= 10_000) return (v / 10_000).toFixed(0) + "만";
       return v.toLocaleString("ko-KR");
     }
-    if (meta.unit === "h") return v.toFixed(0) + "h";
+    if (meta.unit === "h") return v.toFixed(0) + "시간";
     return v + meta.unit;
   };
 
@@ -690,7 +690,7 @@ function MetricCell({
   isMoney?: boolean;
 }) {
   if (isMoney) return <span>{formatMoney(value)}</span>;
-  if (unit === "h") return <span>{value.toFixed(1)}h</span>;
+  if (unit === "h") return <span>{value.toFixed(1)}시간</span>;
   return (
     <span>
       {value}
@@ -728,7 +728,7 @@ function DiffCell({
       {isMoney
         ? formatMoney(diff)
         : unit === "h"
-          ? `${diff.toFixed(1)}h`
+          ? `${diff.toFixed(1)}시간`
           : `${diff}${unit}`}
     </span>
   );

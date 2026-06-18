@@ -146,9 +146,9 @@ export function ReallocationPlan({
               },
               {
                 label: "유휴시간",
-                value: `${result.idleHours.toFixed(1)}H`,
+                value: `${result.idleHours.toFixed(1)}시간`,
                 tone: result.idleHours > 0.01 ? ("rose" as const) : ("slate" as const),
-                hint: `정규 유휴 ${result.regularIdleHours.toFixed(1)}H + 잔업 유휴 ${result.overtimeIdleHours.toFixed(1)}H`,
+                hint: `정규 유휴 ${result.regularIdleHours.toFixed(1)}시간 + 잔업 유휴 ${result.overtimeIdleHours.toFixed(1)}시간`,
               },
               {
                 label: "잔업인원",
@@ -163,7 +163,7 @@ export function ReallocationPlan({
               },
               {
                 label: "이월시간",
-                value: `${result.totalCarry.toFixed(1)}H`,
+                value: `${result.totalCarry.toFixed(1)}시간`,
                 tone: result.totalCarry > 0.01 ? ("amber" as const) : ("slate" as const),
               },
             ] as {
@@ -253,7 +253,7 @@ export function ReallocationPlan({
                         </div>
                         {t.loadHours > 0.01 && (
                           <div className="text-[10px] text-slate-400">
-                            {t.loadHours.toFixed(1)}H
+                            {t.loadHours.toFixed(1)}시간
                           </div>
                         )}
                       </div>
@@ -385,9 +385,9 @@ export function ReallocationPlan({
                       ) : (
                         <span
                           className="text-amber-700 font-medium whitespace-nowrap"
-                          title={`${t.carryHours.toFixed(1)}H 이월`}
+                          title={`${t.carryHours.toFixed(1)}시간 이월`}
                         >
-                          {t.carryHours.toFixed(1)}H 이월
+                          {t.carryHours.toFixed(1)}시간 이월
                         </span>
                       )}
                     </div>

@@ -250,7 +250,7 @@ export function NamedReallocationPlan({
                 </div>
                 {t.loadHours > 0.01 && (
                   <div className="text-[10px] text-slate-400">
-                    {t.loadHours.toFixed(1)}H
+                    {t.loadHours.toFixed(1)}시간
                   </div>
                 )}
               </div>
@@ -384,7 +384,7 @@ export function NamedReallocationPlan({
                 </span>
               ) : (
                 <span className="text-amber-700 font-medium whitespace-nowrap">
-                  {t.carryHours.toFixed(1)}H 이월
+                  {t.carryHours.toFixed(1)}시간 이월
                 </span>
               )}
             </div>
@@ -454,7 +454,7 @@ export function NamedReallocationPlan({
                       cell.workerNames.length === 1
                         ? dur * 0.6
                         : cell.workerNames.length * dur;
-                    return `+${eff.toFixed(1)}H`;
+                    return `+${eff.toFixed(1)}시간`;
                   })()}
                 </span>
               </div>

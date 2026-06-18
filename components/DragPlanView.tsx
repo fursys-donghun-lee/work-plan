@@ -1340,11 +1340,11 @@ export function DragPlanView({
                   type="button"
                   onClick={() => setTempCellModalLine(s.line)}
                   className="text-[11px] px-2 py-1 rounded bg-white border border-purple-300 hover:bg-purple-100 text-purple-800 font-medium"
-                  title={`${displayName(s.line)} 임시셀 구성 (잔여 ${s.remaining.toFixed(1)}H)`}
+                  title={`${displayName(s.line)} 임시셀 구성 (잔여 ${s.remaining.toFixed(1)}시간)`}
                 >
                   {displayName(s.line)}{" "}
                   <span className="text-purple-600">
-                    {s.remaining.toFixed(1)}H
+                    {s.remaining.toFixed(1)}시간
                   </span>
                 </button>
               ))}
@@ -1412,7 +1412,7 @@ export function DragPlanView({
                   ? "부하 없음"
                   : done >= load - 0.01
                     ? `완료 (여유 ${(done - load).toFixed(1)})`
-                    : `이월 ${(load - done).toFixed(1)}H`;
+                    : `이월 ${(load - done).toFixed(1)}시간`;
               // 부하 영역 내 최대 hc (이미 2명 짝 차있는지 판단용)
               let maxHcInLoad = 0;
               for (let h = 0; h < HOUR_COUNT; h++) {
@@ -1437,7 +1437,7 @@ export function DragPlanView({
                   statusBadge = {
                     text: "지원필요",
                     tone: "rose",
-                    title: `부하 ${load.toFixed(1)}H 중 ${done.toFixed(1)}H 처리 — 추가 ${(load - done).toFixed(1)}H 필요`,
+                    title: `부하 ${load.toFixed(1)}시간 중 ${done.toFixed(1)}시간 처리 — 추가 ${(load - done).toFixed(1)}시간 필요`,
                   };
                 } else if (
                   maxHcInLoad > 0 &&
@@ -1450,14 +1450,14 @@ export function DragPlanView({
                     title:
                       load <= 0.01
                         ? `이 라인에 부하 없음 (${maxHcInLoad}명 배치됨)`
-                        : `부하 ${load.toFixed(1)}H 대비 ${done.toFixed(1)}H 처리 — ${(done - load).toFixed(1)}H 여유`,
+                        : `부하 ${load.toFixed(1)}시간 대비 ${done.toFixed(1)}시간 처리 — ${(done - load).toFixed(1)}시간 여유`,
                   };
                 } else {
                   // 그 외 → 정상
                   statusBadge = {
                     text: "정상",
                     tone: "emerald",
-                    title: `부하 ${load.toFixed(1)}H / 처리 ${done.toFixed(1)}H`,
+                    title: `부하 ${load.toFixed(1)}시간 / 처리 ${done.toFixed(1)}시간`,
                   };
                 }
               }
@@ -1491,7 +1491,7 @@ export function DragPlanView({
                     </div>
                     {tempCellsByLine[line]?.length > 0 && (
                       <div className="text-[9px] text-purple-700 font-semibold leading-tight whitespace-nowrap">
-                        +임시 {(tempCellDoneByLine[line] ?? 0).toFixed(1)}H
+                        +임시 {(tempCellDoneByLine[line] ?? 0).toFixed(1)}시간
                       </div>
                     )}
                     {!isAuto && (
@@ -1556,7 +1556,7 @@ export function DragPlanView({
                         >
                           {done.toFixed(1)} / {load.toFixed(1)}
                         </div>
-                        <div className="text-[10px] text-slate-400">H</div>
+                        <div className="text-[10px] text-slate-400">시간</div>
                       </>
                     ) : (
                       <span className="text-slate-300">—</span>
@@ -2106,7 +2106,7 @@ function TempCellModal({
           <div className="flex items-center justify-between">
             <div className="text-xs text-slate-600">
               {span}h × {selectedWorkers.length}명 →{" "}
-              <b className="text-emerald-700">{processed.toFixed(1)}H</b>
+              <b className="text-emerald-700">{processed.toFixed(1)}시간</b>
               {selectedWorkers.length === 1 && " (1인 60%)"}
             </div>
             <button
@@ -2148,7 +2148,7 @@ function TempCellModal({
                       {tc.workers.join(", ")}
                       <span className="text-slate-500"> · </span>
                       <span className="text-emerald-700 font-semibold">
-                        {tcProcessed.toFixed(1)}H
+                        {tcProcessed.toFixed(1)}시간
                       </span>
                     </div>
                     <button

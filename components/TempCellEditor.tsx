@@ -224,7 +224,7 @@ export function TempCellEditor({
                         <option key={t.name} value={t.name}>
                           {t.name}
                           {t.carryHours > 0.5
-                            ? ` (이월 ${t.carryHours.toFixed(1)}H)`
+                            ? ` (이월 ${t.carryHours.toFixed(1)}시간)`
                             : ""}
                         </option>
                       ))}
@@ -338,7 +338,7 @@ export function TempCellEditor({
                   <span>
                     처리 부하:{" "}
                     <b className="text-emerald-700">
-                      {effectiveLoad.toFixed(1)}H
+                      {effectiveLoad.toFixed(1)}시간
                     </b>{" "}
                     {peopleCount === 1 && "(1인 60% 적용)"}
                   </span>
