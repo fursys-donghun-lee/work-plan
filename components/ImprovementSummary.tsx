@@ -35,8 +35,8 @@ export function ImprovementSummary({
       label: "유휴 시간",
       base: rBasic.idleHours,
       real: rReal.idleHours,
-      fmtVal: (v) => `${v.toFixed(1)}인시`,
-      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(1)}인시`,
+      fmtVal: (v) => `${v.toFixed(1)}H`,
+      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(1)}H`,
       betterUp: false,
     },
     {
@@ -59,8 +59,8 @@ export function ImprovementSummary({
       label: "이월",
       base: rBasic.totalCarry,
       real: rReal.totalCarry,
-      fmtVal: (v) => `${v.toFixed(1)}인시`,
-      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(1)}인시`,
+      fmtVal: (v) => `${v.toFixed(1)}H`,
+      fmtDelta: (d) => `${d > 0 ? "+" : ""}${d.toFixed(1)}H`,
       betterUp: false,
     },
   ];

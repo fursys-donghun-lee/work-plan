@@ -56,9 +56,9 @@ export function RealMetricsPanel({ result, title }: Props) {
     },
     {
       label: "유휴시간",
-      value: `${result.idleHours.toFixed(1)}인시`,
+      value: `${result.idleHours.toFixed(1)}H`,
       tone: result.idleHours > 0.01 ? "rose" : "slate",
-      hint: `정규 유휴 ${result.regularIdleHours.toFixed(1)}인시 + 잔업 유휴 ${result.overtimeIdleHours.toFixed(1)}인시`,
+      hint: `정규 유휴 ${result.regularIdleHours.toFixed(1)}H + 잔업 유휴 ${result.overtimeIdleHours.toFixed(1)}H`,
     },
     {
       label: "잔업인원",
@@ -67,13 +67,13 @@ export function RealMetricsPanel({ result, title }: Props) {
     },
     {
       label: "잔업 라인",
-      value: `${otLineCount} / ${activeLineCount}`,
+      value: `${otLineCount}라인`,
       tone: otLineCount > 0 ? "rose" : "slate",
       hint: `잔업 작업시간 2h 이상 라인 ${otLineCount}개 / 전체 가동 라인 ${activeLineCount}개`,
     },
     {
       label: "이월시간",
-      value: `${result.totalCarry.toFixed(1)}인시`,
+      value: `${result.totalCarry.toFixed(1)}H`,
       tone: result.totalCarry > 0.01 ? "amber" : "slate",
     },
   ];
