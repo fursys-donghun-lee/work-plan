@@ -510,6 +510,21 @@ export function CompanyMainDashboard({ company }: Props) {
     overtimeConfirmedByCat.set(cat, (overtimeConfirmedByCat.get(cat) ?? 0) + 1);
   }
 
+  // 다호 잔업확정 규칙 — 다호 포장1 + 대림 포장2 확정 상태에 따라 파생
+  //  · 피더(3명): 다호 포장1 확정 ≥ 1 → 출근 피더 전원
+  //  · 물류:      0/1/2 라인 확정 → 0/1/2명
+  //  · 자재:      0/1/2 라인 확정 → 0/2/3명
+  const dohoP1OT = dohoPlanOvertimeConfirmed;
+  const daerimP2OT = manualPlanOvertimeConfirmed;
+  const dohoLinesWithOT =
+    (dohoP1OT >= 1 ? 1 : 0) + (daerimP2OT >= 1 ? 1 : 0);
+  const dohoFeederPresent =
+    package1.groups.find((g) => g.group === "피더")?.presentMembers.length ?? 0;
+  const dohoFeederOTConfirmed = dohoP1OT >= 1 ? dohoFeederPresent : 0;
+  const dohoLogisticsOTConfirmed = dohoLinesWithOT; // 0/1/2
+  const dohoMaterialsOTConfirmed =
+    dohoLinesWithOT === 0 ? 0 : dohoLinesWithOT === 1 ? 2 : 3;
+
   const enriched = summaries.map((s) => {
     const stats = getCategoryStats(s.category);
     const finalAvailable = s.attendanceCount + stats.received - stats.sent;
@@ -522,6 +537,10 @@ export function CompanyMainDashboard({ company }: Props) {
       overtimeConfirmedCount = manualPlanPCMOvertimeConfirmed;
     } else if (company === "다호산업" && s.category === "포장1라인") {
       overtimeConfirmedCount = dohoPlanOvertimeConfirmed;
+    } else if (company === "다호산업" && s.category === "물류") {
+      overtimeConfirmedCount = dohoLogisticsOTConfirmed;
+    } else if (company === "다호산업" && s.category === "자재") {
+      overtimeConfirmedCount = dohoMaterialsOTConfirmed;
     } else {
       overtimeConfirmedCount = overtimeConfirmedByCat.get(s.category) ?? 0;
     }
@@ -594,10 +613,11 @@ export function CompanyMainDashboard({ company }: Props) {
       }
     }
   } else if (company === "다호산업") {
+    // 다호 피더 잔업확정: 다호 포장1 확정 ≥ 1 → 출근 피더 전원 (위에서 계산)
     const f = buildFeederRow(
       package1.groups.find((g) => g.group === "피더"),
       dohoPlanFeederOvertimeBasic,
-      dohoPlanFeederOvertimeConfirmed
+      dohoFeederOTConfirmed
     );
     displayRows = [];
     for (const row of enriched) {
