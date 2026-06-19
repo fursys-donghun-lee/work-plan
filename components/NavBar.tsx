@@ -15,6 +15,7 @@ const NAV_ITEMS_BY_COMPANY: Record<Company, { href: string; label: string }[]> =
   ],
   우성산업: [
     { href: "/", label: "메인 대시보드" },
+    { href: "/clock-in", label: "현장 대시보드" },
     { href: "/workgroups", label: "그룹별 부하" },
     { href: "/equipment", label: "설비별 부하" },
   ],
