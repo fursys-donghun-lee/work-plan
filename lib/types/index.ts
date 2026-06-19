@@ -352,6 +352,24 @@ export interface Package1GroupLoad {
   supportCount: number;              // 다른 라인에서 받아 이 그룹에 배치된 지원인원 수
 }
 
+// === 출근/이동 로그 (인원별 근무관리) ===
+export type WorkLogAction = "출근" | "퇴근" | "지원" | "이동";
+
+export interface WorkLogEntry {
+  id: string;            // 고유 ID (timestamp + empCode + random)
+  empCode: string;
+  name: string;
+  workDate: string;      // YYYY-MM-DD
+  timestamp: string;     // ISO datetime
+  action: WorkLogAction;
+  line?: string;         // 출근/퇴근/지원 시 당시 위치
+  fromLine?: string;     // 이동 시 출발 라인
+  toLine?: string;       // 이동 시 도착 라인
+}
+
+// 사원코드 → 현재 라인 위치 (출근 후 드래그앤드롭/지원으로 변경 가능)
+export type CurrentLineOverrides = Record<string, string>;
+
 // === 도장계획 (다호산업 일일자료) ===
 export interface PaintPlanRow {
   no: string;            // A: 번호

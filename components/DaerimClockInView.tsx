@@ -1,9 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useHydrated } from "@/components/useComputed";
 import { EmptyState } from "@/components/EmptyState";
+import { ActionModal } from "@/components/ActionModal";
 import { cn } from "@/lib/utils";
 import type { Employee, AttendanceRecord } from "@/lib/types";
 import { PACKAGE2_FEEDER_WORKERS } from "@/lib/types";
@@ -31,26 +32,17 @@ const LINE_GRID: string[][] = [
   ["PA-06", "PA-07", "자동포장라인", "포장철물"],
   ["MA-01", "MA-02", "MA-03", "MM-05"],
 ];
-
-// 그리드 라인 (Set) — 포장철물 포함
 const GRID_LINES = new Set<string>(LINE_GRID.flat());
 
 // 재배치 계획에서 자동포장라인으로 묶이는 packagePosition.position 값들
-//   (useDaerimRealloc 의 AUTO_GROUP_NAMES 와 동일)
 const AUTO_PACKAGE_POSITIONS = new Set<string>([
   "PA-01",
   "PA-02",
   "자동포장(파이프)",
 ]);
 
-// 직원의 슬롯 결정 — 우선순위:
-//   1) 포장철물 키워드 매칭 → 포장철물
-//   2) 기준자료 포장라인 기본근무위치(packagePosition.position) 매핑
-//      · PA-01·PA-02·자동포장(파이프) → 자동포장라인
-//      · 그 외 PA/MM/MA → 해당 슬롯
-//   3) employee.baseLocation fallback
-//   4) 기타
-function slotFor(
+// 직원의 기본 슬롯 결정 — 출근 시 자동 배치되는 위치
+function defaultSlotFor(
   empCode: string,
   category: string,
   department: string,
@@ -66,17 +58,22 @@ function slotFor(
   ) {
     return "포장철물";
   }
-
   const pkgPos = packagePos.get(empCode);
   if (pkgPos) {
     if (AUTO_PACKAGE_POSITIONS.has(pkgPos)) return "자동포장라인";
     if (GRID_LINES.has(pkgPos)) return pkgPos;
   }
-
   const loc = (baseLocation || "").trim();
   if (GRID_LINES.has(loc)) return loc;
-
   return "기타";
+}
+
+interface ModalState {
+  open: boolean;
+  empCode: string;
+  name: string;
+  currentLine: string;
+  isPresent: boolean;
 }
 
 export function DaerimClockInView() {
@@ -85,23 +82,36 @@ export function DaerimClockInView() {
   const attendance = useDataStore((s) => s.attendance);
   const workDate = useDataStore((s) => s.workDate);
   const packagePosition = useDataStore((s) => s.packagePosition);
+  const currentLineOverrides = useDataStore((s) => s.currentLineOverrides);
   const clockInEmployee = useDataStore((s) => s.clockInEmployee);
   const clockOutEmployee = useDataStore((s) => s.clockOutEmployee);
+  const logSupport = useDataStore((s) => s.logSupport);
+  const moveWorkerLine = useDataStore((s) => s.moveWorkerLine);
 
-  // 대림 직원 추출 + 출근 lookup + 슬롯 매핑 + 미출근 그룹화
+  const [modal, setModal] = useState<ModalState>({
+    open: false,
+    empCode: "",
+    name: "",
+    currentLine: "",
+    isPresent: false,
+  });
+
+  const [draggingEmpCode, setDraggingEmpCode] = useState<string | null>(null);
+
+  // 대림 직원 추출 + 슬롯 매핑 (override > packagePosition > baseLocation)
   const {
     presentBySlot,
     presentOthers,
     notClockedInGroups,
     notClockedInTotal,
     attMap,
+    defaultSlotMap,
+    currentSlotMap,
     stats,
   } = useMemo(() => {
     const daerimEmps = employees.filter((e) =>
       e.department.includes("대림산업")
     );
-
-    // 기준자료 포장라인 기본근무위치 → empCode → position 매핑
     const pkgPosMap = new Map<string, string>();
     for (const p of packagePosition) {
       if (p.empCode) pkgPosMap.set(p.empCode, p.position || "");
@@ -116,8 +126,12 @@ export function DaerimClockInView() {
     const feederNot: Employee[] = [];
     const workerNot: Employee[] = [];
 
+    // 기본 슬롯 (출근 시 자동 배치 위치) + 현재 슬롯 (override 반영)
+    const defaultSlotMap = new Map<string, string>();
+    const currentSlotMap = new Map<string, string>();
+
     for (const e of daerimEmps) {
-      const slot = slotFor(
+      const def = defaultSlotFor(
         e.empCode,
         e.category,
         e.department,
@@ -125,24 +139,26 @@ export function DaerimClockInView() {
         e.position,
         pkgPosMap
       );
+      defaultSlotMap.set(e.empCode, def);
+      const cur = currentLineOverrides[e.empCode] || def;
+      currentSlotMap.set(e.empCode, cur);
+
       const isPresent = !!m.get(e.empCode)?.isPresent;
       if (!isPresent) {
         const grp = classifyGroup(e);
         if (grp === "소사장") sajangNot.push(e);
         else if (grp === "피더") feederNot.push(e);
         else if (grp === "작업자") workerNot.push(e);
-        // 그 외(매칭 안 됨)는 미출근 표시 안 함 (출근 전 카드에는 안 나옴)
         continue;
       }
-      if (slot === "기타") {
+      if (cur === "기타" || !GRID_LINES.has(cur)) {
         presentOthers.push(e);
       } else {
-        if (!presentBySlot.has(slot)) presentBySlot.set(slot, []);
-        presentBySlot.get(slot)!.push(e);
+        if (!presentBySlot.has(cur)) presentBySlot.set(cur, []);
+        presentBySlot.get(cur)!.push(e);
       }
     }
 
-    // 정렬 — 이름 가나다순
     const cmp = (a: Employee, b: Employee) => a.name.localeCompare(b.name, "ko");
     for (const arr of presentBySlot.values()) arr.sort(cmp);
     presentOthers.sort(cmp);
@@ -150,7 +166,8 @@ export function DaerimClockInView() {
     feederNot.sort(cmp);
     workerNot.sort(cmp);
 
-    const notClockedInTotal = sajangNot.length + feederNot.length + workerNot.length;
+    const notClockedInTotal =
+      sajangNot.length + feederNot.length + workerNot.length;
     const total = daerimEmps.length;
     const present = total - notClockedInTotal;
 
@@ -160,9 +177,11 @@ export function DaerimClockInView() {
       notClockedInGroups: { 소사장: sajangNot, 피더: feederNot, 작업자: workerNot },
       notClockedInTotal,
       attMap: m,
+      defaultSlotMap,
+      currentSlotMap,
       stats: { total, present, absent: notClockedInTotal },
     };
-  }, [employees, attendance, packagePosition]);
+  }, [employees, attendance, packagePosition, currentLineOverrides]);
 
   if (!hydrated) return null;
 
@@ -177,6 +196,44 @@ export function DaerimClockInView() {
     );
   }
 
+  // 이름 클릭 → 모달 오픈
+  const openModalFor = (e: Employee) => {
+    const isPresent = !!attMap.get(e.empCode)?.isPresent;
+    const currentLine = currentSlotMap.get(e.empCode) || "";
+    setModal({
+      open: true,
+      empCode: e.empCode,
+      name: e.name,
+      currentLine,
+      isPresent,
+    });
+  };
+
+  const closeModal = () => setModal((m) => ({ ...m, open: false }));
+
+  const handleClockIn = () => {
+    const defaultLine = defaultSlotMap.get(modal.empCode) || "";
+    clockInEmployee(modal.empCode, modal.name, defaultLine);
+    closeModal();
+  };
+
+  const handleClockOut = () => {
+    clockOutEmployee(modal.empCode, modal.name, modal.currentLine);
+    closeModal();
+  };
+
+  const handleSupport = () => {
+    logSupport(modal.empCode, modal.name, modal.currentLine);
+    closeModal();
+  };
+
+  // 드래그 핸들러 — 라인 슬롯 간 이동
+  const handleDrop = (toLine: string, empCode: string, name: string) => {
+    const fromLine = currentSlotMap.get(empCode) || "";
+    if (fromLine === toLine) return;
+    moveWorkerLine(empCode, name, fromLine, toLine);
+  };
+
   return (
     <div className="space-y-5">
       <div className="flex items-end justify-between flex-wrap gap-3">
@@ -188,7 +245,7 @@ export function DaerimClockInView() {
             근무일자{" "}
             <span className="font-semibold">{workDate || "(미지정)"}</span>
             <span className="ml-3 text-slate-400">
-              본인 이름을 누르면 누른 시각으로 출근 처리됩니다.
+              이름 클릭으로 출근·퇴근·지원 / 드래그앤드롭으로 라인 이동
             </span>
           </p>
         </div>
@@ -233,9 +290,7 @@ export function DaerimClockInView() {
         </div>
       </div>
 
-      {/* 본문 — 왼쪽: 라인 배치 그리드 / 오른쪽: 출근 전 세로 패널 */}
       <div className="flex gap-4 items-start">
-        {/* 왼쪽: 라인 그리드 (4행) — 출근한 인원만 표시 */}
         <div className="flex-1 min-w-0 space-y-3">
           {LINE_GRID.map((row, ri) => (
             <div
@@ -251,13 +306,15 @@ export function DaerimClockInView() {
                   line={line}
                   workers={presentBySlot.get(line) ?? []}
                   attMap={attMap}
-                  onClockOut={clockOutEmployee}
+                  onChipClick={openModalFor}
+                  onDropWorker={(empCode, name) => handleDrop(line, empCode, name)}
+                  draggingEmpCode={draggingEmpCode}
+                  setDraggingEmpCode={setDraggingEmpCode}
                 />
               ))}
             </div>
           ))}
 
-          {/* 기타 — 출근했지만 13개 라인에 속하지 않는 직원 (사장님 등) */}
           {presentOthers.length > 0 && (
             <div className="rounded-lg border border-slate-200 bg-white p-3">
               <h2 className="font-semibold text-slate-900 text-sm mb-2">
@@ -272,7 +329,10 @@ export function DaerimClockInView() {
                     key={e.empCode}
                     employee={e}
                     attendance={attMap.get(e.empCode)}
-                    onClockOut={clockOutEmployee}
+                    onClick={() => openModalFor(e)}
+                    draggable={false}
+                    draggingEmpCode={draggingEmpCode}
+                    setDraggingEmpCode={setDraggingEmpCode}
                   />
                 ))}
               </div>
@@ -280,7 +340,6 @@ export function DaerimClockInView() {
           )}
         </div>
 
-        {/* 오른쪽: 출근 전 그룹 세로 패널 */}
         {notClockedInTotal > 0 && (
           <div className="w-60 flex-shrink-0 card border-amber-200 bg-amber-50/40 self-stretch">
             <h2 className="font-semibold text-slate-900 mb-3 text-sm">
@@ -295,13 +354,25 @@ export function DaerimClockInView() {
                   key={grp}
                   label={grp}
                   workers={notClockedInGroups[grp]}
-                  onClockIn={clockInEmployee}
+                  onClickName={openModalFor}
                 />
               ))}
             </div>
           </div>
         )}
       </div>
+
+      <ActionModal
+        open={modal.open}
+        workerName={modal.name}
+        workerEmpCode={modal.empCode}
+        currentLine={modal.currentLine}
+        isPresent={modal.isPresent}
+        onClose={closeModal}
+        onClockIn={handleClockIn}
+        onClockOut={handleClockOut}
+        onSupport={handleSupport}
+      />
     </div>
   );
 }
@@ -309,11 +380,11 @@ export function DaerimClockInView() {
 function NotClockedInGroup({
   label,
   workers,
-  onClockIn,
+  onClickName,
 }: {
   label: string;
   workers: Employee[];
-  onClockIn: (empCode: string, name: string) => void;
+  onClickName: (e: Employee) => void;
 }) {
   return (
     <div>
@@ -331,9 +402,9 @@ function NotClockedInGroup({
             <button
               key={e.empCode}
               type="button"
-              onClick={() => onClockIn(e.empCode, e.name)}
+              onClick={() => onClickName(e)}
               className="w-full px-3 py-1.5 rounded-md text-sm font-semibold border bg-white border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors text-center"
-              title={`${e.name} · 눌러서 출근`}
+              title={`${e.name}`}
             >
               {e.name}
             </button>
@@ -348,16 +419,51 @@ function LineCard({
   line,
   workers,
   attMap,
-  onClockOut,
+  onChipClick,
+  onDropWorker,
+  draggingEmpCode,
+  setDraggingEmpCode,
 }: {
   line: string;
   workers: Employee[];
   attMap: Map<string, AttendanceRecord>;
-  onClockOut: (empCode: string) => void;
+  onChipClick: (e: Employee) => void;
+  onDropWorker: (empCode: string, name: string) => void;
+  draggingEmpCode: string | null;
+  setDraggingEmpCode: (s: string | null) => void;
 }) {
-  // workers 는 이미 출근한 직원만 들어옴
+  const [hover, setHover] = useState(false);
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setHover(true);
+  };
+  const onDragLeave = () => setHover(false);
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setHover(false);
+    const raw = e.dataTransfer.getData("application/json");
+    if (!raw) return;
+    try {
+      const { empCode, name } = JSON.parse(raw) as { empCode: string; name: string };
+      onDropWorker(empCode, name);
+    } catch {
+      // ignore
+    }
+  };
+
   return (
-    <div className="rounded-lg border border-slate-200 bg-white p-3 min-h-[120px]">
+    <div
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={cn(
+        "rounded-lg border bg-white p-3 min-h-[120px] transition-colors",
+        hover
+          ? "border-blue-400 bg-blue-50/40 ring-2 ring-blue-200"
+          : "border-slate-200"
+      )}
+    >
       <div className="flex items-center justify-between mb-2">
         <div className="font-bold text-slate-800 text-sm">
           {line === "자동포장라인" ? "자동포장" : line}
@@ -380,7 +486,10 @@ function LineCard({
               key={e.empCode}
               employee={e}
               attendance={attMap.get(e.empCode)}
-              onClockOut={onClockOut}
+              onClick={() => onChipClick(e)}
+              draggable
+              draggingEmpCode={draggingEmpCode}
+              setDraggingEmpCode={setDraggingEmpCode}
             />
           ))
         )}
@@ -389,35 +498,48 @@ function LineCard({
   );
 }
 
-// 출근한 직원 칩 — 라인 그리드 / 기타 카드에서 사용. 클릭하면 출근 취소
 function PresentChip({
   employee,
   attendance,
-  onClockOut,
+  onClick,
+  draggable,
+  draggingEmpCode,
+  setDraggingEmpCode,
 }: {
   employee: Employee;
   attendance: AttendanceRecord | undefined;
-  onClockOut: (empCode: string) => void;
+  onClick: () => void;
+  draggable: boolean;
+  draggingEmpCode: string | null;
+  setDraggingEmpCode: (s: string | null) => void;
 }) {
   const timeLabel = formatTime(attendance?.startTime);
+  const isDragging = draggingEmpCode === employee.empCode;
 
-  const handleClick = () => {
-    if (
-      !window.confirm(
-        `${employee.name} 출근을 취소할까요? (대기자 목록으로 돌아갑니다)`
-      )
-    ) {
-      return;
-    }
-    onClockOut(employee.empCode);
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData(
+      "application/json",
+      JSON.stringify({ empCode: employee.empCode, name: employee.name })
+    );
+    e.dataTransfer.effectAllowed = "move";
+    setDraggingEmpCode(employee.empCode);
   };
+  const handleDragEnd = () => setDraggingEmpCode(null);
 
   return (
     <button
       type="button"
-      onClick={handleClick}
-      className="px-2.5 py-1.5 rounded-md text-xs font-semibold border bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700 transition-colors"
-      title={`${employee.name} · 출근 ${timeLabel} (눌러서 출근 취소)`}
+      draggable={draggable}
+      onDragStart={draggable ? handleDragStart : undefined}
+      onDragEnd={draggable ? handleDragEnd : undefined}
+      onClick={onClick}
+      className={cn(
+        "px-2.5 py-1.5 rounded-md text-xs font-semibold border transition-colors",
+        "bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200",
+        draggable && "cursor-grab active:cursor-grabbing",
+        isDragging && "opacity-50"
+      )}
+      title={`${employee.name} · 출근 ${timeLabel}${draggable ? " · 드래그로 라인 이동" : ""}`}
     >
       <span>{employee.name}</span>
       {timeLabel && (
@@ -429,7 +551,6 @@ function PresentChip({
   );
 }
 
-// startTime → HH:MM 표시. 엑셀 decimal (0~1) 도 처리
 function formatTime(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === "") return "";
   if (typeof value === "string") {

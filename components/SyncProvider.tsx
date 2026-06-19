@@ -32,6 +32,8 @@ const DAILY_KEYS = [
   "paintPlanMeta",
   "packageLoadMeta",
   "urgentProductionMeta",
+  "workLog",
+  "currentLineOverrides",
 ] as const;
 const PLAN_KEYS = [
   // 대림 포장2라인

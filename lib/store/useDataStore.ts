@@ -21,6 +21,8 @@ import type {
   UploadLogEntry,
   UrgentProductionRow,
   WorkGroup,
+  WorkLogEntry,
+  CurrentLineOverrides,
 } from "@/lib/types";
 import { DEFAULT_WORK_GROUPS } from "@/lib/calc/defaultGroups";
 
@@ -96,6 +98,11 @@ interface DataState {
   // 업로드 로그 (최근 50개 유지)
   uploadLog: UploadLogEntry[];
 
+  // 인원별 근무 로그 (출근/퇴근/지원/이동 시간 기록)
+  workLog: WorkLogEntry[];
+  // 사원코드 → 현재 라인 (출근 후 변경된 위치)
+  currentLineOverrides: CurrentLineOverrides;
+
   // Actions
   setSelectedCompany: (company: Company) => void;
   setCompanyChosen: (chosen: boolean) => void;
@@ -116,8 +123,10 @@ interface DataState {
   addLineBase: (item: LineBaseHeadcount) => void;
   deleteLineBase: (index: number) => void;
   setAttendance: (data: AttendanceRecord[], workDate: string, meta: UploadMeta) => void;
-  clockInEmployee: (empCode: string, name: string) => void;
-  clockOutEmployee: (empCode: string) => void;
+  clockInEmployee: (empCode: string, name: string, line?: string) => void;
+  clockOutEmployee: (empCode: string, name: string, line?: string) => void;
+  logSupport: (empCode: string, name: string, line: string) => void;
+  moveWorkerLine: (empCode: string, name: string, fromLine: string, toLine: string) => void;
   setWorkDate: (workDate: string) => void;
   setLoadPlan: (data: LoadPlanRow[], meta: UploadMeta) => void;
   setPaintPlan: (data: PaintPlanRow[], meta: UploadMeta) => void;
@@ -230,6 +239,8 @@ export const useDataStore = create<DataState>()(
       dohoPlanFeederOvertimeBasic: 0,
       dohoPlanFeederOvertimeConfirmed: 0,
       uploadLog: [],
+      workLog: [],
+      currentLineOverrides: {},
 
       setSelectedCompany: (company) => set({ selectedCompany: company }),
       setCompanyChosen: (chosen) => set({ companyChosen: chosen }),
@@ -281,39 +292,32 @@ export const useDataStore = create<DataState>()(
       // setAttendance: 파일의 workDate 는 무시 (오늘 날짜는 SessionState 가 관리)
       setAttendance: (data, _workDate, meta) =>
         set({ attendance: data, attendanceMeta: meta }),
-      // 출근 취소 — 출근 표시 해제 (다시 대기자 목록으로)
-      clockOutEmployee: (empCode) =>
-        set((state) => {
-          const idx = state.attendance.findIndex((a) => a.empCode === empCode);
-          if (idx < 0) return state;
-          const next = [...state.attendance];
-          next[idx] = {
-            ...next[idx],
-            isPresent: false,
-            startTime: null,
-          };
-          return { attendance: next };
-        }),
-      // 출근 체크인 — 직원이 이름을 클릭한 시각으로 출근 처리
-      clockInEmployee: (empCode, name) =>
+      // 출근 — attendance 갱신 + workLog 출근 기록 + currentLineOverrides 에 기본 위치
+      clockInEmployee: (empCode, name, line) =>
         set((state) => {
           const now = new Date();
           const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+          const logEntry: WorkLogEntry = {
+            id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
+            empCode,
+            name,
+            workDate: state.workDate,
+            timestamp: now.toISOString(),
+            action: "출근",
+            line: line || "",
+          };
           const idx = state.attendance.findIndex((a) => a.empCode === empCode);
+          let nextAttendance: AttendanceRecord[];
           if (idx >= 0) {
-            // 기존 레코드 갱신 (이미 출근 표시돼 있어도 시간 다시 찍음)
-            const next = [...state.attendance];
-            next[idx] = {
-              ...next[idx],
+            nextAttendance = [...state.attendance];
+            nextAttendance[idx] = {
+              ...nextAttendance[idx],
               startTime: hhmm,
               isPresent: true,
-              name: next[idx].name || name,
+              name: nextAttendance[idx].name || name,
             };
-            return { attendance: next };
-          }
-          // 새 레코드 추가
-          return {
-            attendance: [
+          } else {
+            nextAttendance = [
               ...state.attendance,
               {
                 empCode,
@@ -322,7 +326,84 @@ export const useDataStore = create<DataState>()(
                 startTime: hhmm,
                 isPresent: true,
               },
-            ],
+            ];
+          }
+          const nextOverrides = line
+            ? { ...state.currentLineOverrides, [empCode]: line }
+            : state.currentLineOverrides;
+          return {
+            attendance: nextAttendance,
+            workLog: [...state.workLog, logEntry],
+            currentLineOverrides: nextOverrides,
+          };
+        }),
+      // 퇴근 — attendance 해제 + workLog 퇴근 기록 + override 제거
+      clockOutEmployee: (empCode, name, line) =>
+        set((state) => {
+          const now = new Date();
+          const logEntry: WorkLogEntry = {
+            id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
+            empCode,
+            name,
+            workDate: state.workDate,
+            timestamp: now.toISOString(),
+            action: "퇴근",
+            line: line || "",
+          };
+          const idx = state.attendance.findIndex((a) => a.empCode === empCode);
+          let nextAttendance = state.attendance;
+          if (idx >= 0) {
+            nextAttendance = [...state.attendance];
+            nextAttendance[idx] = {
+              ...nextAttendance[idx],
+              isPresent: false,
+              startTime: null,
+            };
+          }
+          const nextOverrides = { ...state.currentLineOverrides };
+          delete nextOverrides[empCode];
+          return {
+            attendance: nextAttendance,
+            workLog: [...state.workLog, logEntry],
+            currentLineOverrides: nextOverrides,
+          };
+        }),
+      // 지원 — workLog 에 '지원' 액션만 기록 (위치는 그대로 유지)
+      logSupport: (empCode, name, line) =>
+        set((state) => {
+          const now = new Date();
+          const logEntry: WorkLogEntry = {
+            id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
+            empCode,
+            name,
+            workDate: state.workDate,
+            timestamp: now.toISOString(),
+            action: "지원",
+            line: line || "",
+          };
+          return { workLog: [...state.workLog, logEntry] };
+        }),
+      // 드래그앤드롭 이동 — workLog 에 이동 기록 + currentLineOverrides 갱신
+      moveWorkerLine: (empCode, name, fromLine, toLine) =>
+        set((state) => {
+          if (fromLine === toLine) return state;
+          const now = new Date();
+          const logEntry: WorkLogEntry = {
+            id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
+            empCode,
+            name,
+            workDate: state.workDate,
+            timestamp: now.toISOString(),
+            action: "이동",
+            fromLine,
+            toLine,
+          };
+          return {
+            workLog: [...state.workLog, logEntry],
+            currentLineOverrides: {
+              ...state.currentLineOverrides,
+              [empCode]: toLine,
+            },
           };
         }),
       setWorkDate: (workDate) => set({ workDate }),
