@@ -140,13 +140,14 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
       }
     }
 
-    // 다른 회사 직원 중 우리 라인 지원하러 온 인원
-    //   · 지원 풀에 있으면 receivedFromOthers
-    //   · 우리 라인 슬롯에 배치됐으면 presentBySlot 에 합류
-    //   · 단, 자기 회사 categoryFilter 통과 안되는 직원도 포함 (받은 지원이므로)
+    // 받은 지원 — 이 대시보드의 '정규 구성원' 이 아닌데 우리 라인 지원하는 인원
+    //   · 다른 회사 직원 (예: 우성 → 도장)
+    //   · 같은 회사이지만 categoryFilter 에 안 걸리는 직원 (예: 다호 포장1 → 도장)
+    //   targetEmps 에 이미 포함된 인원(우리 정규 구성원)은 위 루프에서 처리됐으므로 skip
+    const ownTargetSet = new Set(targetEmps.map((e) => e.empCode));
     const receivedFromOthers: Employee[] = [];
     for (const e of employees) {
-      if (e.department.includes(config.companyDept)) continue;
+      if (ownTargetSet.has(e.empCode)) continue; // 우리 정규 구성원 — 이미 처리
       const isPresent = !!manualClockIns[e.empCode];
       if (!isPresent) continue;
       const target = supportTargetMap[e.empCode];
@@ -165,6 +166,9 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
         // 알 수 없는 override — 지원 풀로 fallback
         receivedFromOthers.push(e);
       }
+
+      // 모달용 currentSlotMap 에도 등록 (받은 지원자 클릭 시 currentLine 표시)
+      currentSlotMap.set(e.empCode, overrideVal || "지원");
     }
 
     const cmp = (a: Employee, b: Employee) =>
