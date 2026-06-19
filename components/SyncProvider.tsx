@@ -583,6 +583,41 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
             localNewer = true;
           }
         }
+
+        // 클릭 출근/이동/지원 등 추가형 필드는 로컬 우선 머지 — 빈 스냅샷이
+        // 덮어써서 출근이 풀리는 race condition 방지
+        const MERGE_MAP_FIELDS = [
+          "manualClockIns",
+          "currentLineOverrides",
+          "supportTargetMap",
+        ];
+        for (const field of MERGE_MAP_FIELDS) {
+          const localVal = local[field];
+          const remoteVal = update[field];
+          if (
+            (localVal && typeof localVal === "object") ||
+            (remoteVal && typeof remoteVal === "object")
+          ) {
+            update[field] = {
+              ...((remoteVal ?? {}) as Record<string, unknown>),
+              ...((localVal ?? {}) as Record<string, unknown>),
+            };
+          }
+        }
+        // workLog: id 기반 union (로컬·리모트 모두 보존)
+        const localLog = local.workLog as Array<{ id?: string }> | undefined;
+        const remoteLog = update.workLog as Array<{ id?: string }> | undefined;
+        if (Array.isArray(localLog) || Array.isArray(remoteLog)) {
+          const map = new Map<string, unknown>();
+          for (const e of remoteLog ?? []) {
+            if (e?.id) map.set(e.id, e);
+          }
+          for (const e of localLog ?? []) {
+            if (e?.id) map.set(e.id, e);
+          }
+          update.workLog = Array.from(map.values());
+        }
+
         useDataStore.setState(stripUndefined(update) as never, false);
         dailyInitialSyncDone = true;
 

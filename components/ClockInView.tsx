@@ -57,6 +57,7 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
   const clockOutEmployee = useDataStore((s) => s.clockOutEmployee);
   const logSupport = useDataStore((s) => s.logSupport);
   const moveWorkerLine = useDataStore((s) => s.moveWorkerLine);
+  const returnFromSupport = useDataStore((s) => s.returnFromSupport);
 
   const GRID_LINES = useMemo(
     () => new Set<string>(config.lineGrid.flat()),
@@ -139,17 +140,31 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
       }
     }
 
-    // 다른 회사 직원 중 우리 라인 지원하러 온 인원 (받은 지원)
+    // 다른 회사 직원 중 우리 라인 지원하러 온 인원
+    //   · 지원 풀에 있으면 receivedFromOthers
+    //   · 우리 라인 슬롯에 배치됐으면 presentBySlot 에 합류
+    //   · 단, 자기 회사 categoryFilter 통과 안되는 직원도 포함 (받은 지원이므로)
     const receivedFromOthers: Employee[] = [];
     for (const e of employees) {
       if (e.department.includes(config.companyDept)) continue;
       const isPresent = !!manualClockIns[e.empCode];
       if (!isPresent) continue;
-      const overrideVal = currentLineOverrides[e.empCode];
-      if (overrideVal !== "지원") continue;
       const target = supportTargetMap[e.empCode];
       if (!target || !selfLineSet.has(target)) continue;
-      receivedFromOthers.push(e);
+
+      const overrideVal = currentLineOverrides[e.empCode];
+      if (!overrideVal || overrideVal === "지원") {
+        // 지원 풀에 대기 중
+        receivedFromOthers.push(e);
+      } else if (GRID_LINES.has(overrideVal)) {
+        // 우리 라인 슬롯에 배치됨
+        if (!presentBySlot.has(overrideVal))
+          presentBySlot.set(overrideVal, []);
+        presentBySlot.get(overrideVal)!.push(e);
+      } else {
+        // 알 수 없는 override — 지원 풀로 fallback
+        receivedFromOthers.push(e);
+      }
     }
 
     const cmp = (a: Employee, b: Employee) =>
@@ -236,9 +251,9 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
     closeModal();
   };
   const handleReturn = () => {
-    // 지원 상태 해제 → 기본 라인으로 복귀 (moveWorkerLine 이 supportTargetMap 정리)
+    // 지원 상태 해제 → 기본 라인으로 복귀 (supportTargetMap 도 함께 정리)
     const defaultLine = defaultSlotMap.get(modal.empCode) || "";
-    moveWorkerLine(modal.empCode, modal.name, "지원", defaultLine);
+    returnFromSupport(modal.empCode, modal.name, defaultLine);
     closeModal();
   };
 
@@ -358,11 +373,8 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
           )}
         </div>
 
-        {(notClockedInTotal > 0 ||
-          supportingNow.length > 0 ||
-          supportingElsewhere.length > 0 ||
-          receivedFromOthers.length > 0) && (
-          <div className="w-56 flex-shrink-0 card border-amber-200 bg-amber-50/40 self-stretch">
+        {/* 우측 패널 — 항상 표시 (전원 출근해도 지원 풀 / 그룹 라벨 유지) */}
+        <div className="w-56 flex-shrink-0 card border-amber-200 bg-amber-50/40 self-stretch">
             <h2 className="font-semibold text-slate-900 mb-3 text-sm">
               대기 인원{" "}
               <span className="text-xs font-normal text-amber-700">
@@ -423,7 +435,6 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
               )}
             </div>
           </div>
-        )}
       </div>
 
       <ActionModal

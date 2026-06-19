@@ -134,6 +134,7 @@ interface DataState {
   clockOutEmployee: (empCode: string, name: string, line?: string) => void;
   logSupport: (empCode: string, name: string, line: string, targetLine: SupportTargetLineName) => void;
   moveWorkerLine: (empCode: string, name: string, fromLine: string, toLine: string) => void;
+  returnFromSupport: (empCode: string, name: string, defaultLine: string) => void;
   setWorkDate: (workDate: string) => void;
   setLoadPlan: (data: LoadPlanRow[], meta: UploadMeta) => void;
   setPaintPlan: (data: PaintPlanRow[], meta: UploadMeta) => void;
@@ -394,14 +395,37 @@ export const useDataStore = create<DataState>()(
             fromLine,
             toLine,
           };
-          // 라인으로 복귀(toLine !== '지원') 시 supportTargetMap 제거
-          const nextSupport = { ...state.supportTargetMap };
-          if (toLine !== "지원") delete nextSupport[empCode];
+          // 라인 이동만 처리 — supportTargetMap 은 건드리지 않음 (받은 지원 인원이
+          //   슬롯에 배치돼도 우리 라인 지원 상태 유지)
           return {
             workLog: [...state.workLog, logEntry],
             currentLineOverrides: {
               ...state.currentLineOverrides,
               [empCode]: toLine,
+            },
+          };
+        }),
+      // 지원 → 본인 기본 라인 복귀 (홈 회사 대시보드에서만 호출)
+      returnFromSupport: (empCode, name, defaultLine) =>
+        set((state) => {
+          const now = new Date();
+          const logEntry: WorkLogEntry = {
+            id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
+            empCode,
+            name,
+            workDate: state.workDate,
+            timestamp: now.toISOString(),
+            action: "이동",
+            fromLine: "지원",
+            toLine: defaultLine,
+          };
+          const nextSupport = { ...state.supportTargetMap };
+          delete nextSupport[empCode];
+          return {
+            workLog: [...state.workLog, logEntry],
+            currentLineOverrides: {
+              ...state.currentLineOverrides,
+              [empCode]: defaultLine,
             },
             supportTargetMap: nextSupport,
           };
