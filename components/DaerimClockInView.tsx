@@ -83,6 +83,7 @@ export function DaerimClockInView() {
   const workDate = useDataStore((s) => s.workDate);
   const packagePosition = useDataStore((s) => s.packagePosition);
   const currentLineOverrides = useDataStore((s) => s.currentLineOverrides);
+  const manualClockIns = useDataStore((s) => s.manualClockIns);
   const clockInEmployee = useDataStore((s) => s.clockInEmployee);
   const clockOutEmployee = useDataStore((s) => s.clockOutEmployee);
   const logSupport = useDataStore((s) => s.logSupport);
@@ -147,7 +148,8 @@ export function DaerimClockInView() {
       const cur = overrideVal !== undefined && overrideVal !== "" ? overrideVal : def;
       currentSlotMap.set(e.empCode, cur);
 
-      const isPresent = !!m.get(e.empCode)?.isPresent;
+      // 출근 판단 — 일일자료 attendance 가 아닌 manualClockIns(클릭 출근) 만 사용
+      const isPresent = !!manualClockIns[e.empCode];
       if (!isPresent) {
         const grp = classifyGroup(e);
         if (grp === "소사장") sajangNot.push(e);
@@ -189,7 +191,7 @@ export function DaerimClockInView() {
       currentSlotMap,
       stats: { total, present, absent: notClockedInTotal },
     };
-  }, [employees, attendance, packagePosition, currentLineOverrides]);
+  }, [employees, attendance, packagePosition, currentLineOverrides, manualClockIns]);
 
   if (!hydrated) return null;
 
@@ -206,7 +208,7 @@ export function DaerimClockInView() {
 
   // 이름 클릭 → 모달 오픈
   const openModalFor = (e: Employee) => {
-    const isPresent = !!attMap.get(e.empCode)?.isPresent;
+    const isPresent = !!manualClockIns[e.empCode];
     const currentLine = currentSlotMap.get(e.empCode) || "";
     setModal({
       open: true,
@@ -313,7 +315,7 @@ export function DaerimClockInView() {
                   key={line}
                   line={line}
                   workers={presentBySlot.get(line) ?? []}
-                  attMap={attMap}
+                  manualClockIns={manualClockIns}
                   onChipClick={openModalFor}
                   onDropWorker={(empCode, name) => handleDrop(line, empCode, name)}
                   draggingEmpCode={draggingEmpCode}
@@ -336,7 +338,7 @@ export function DaerimClockInView() {
                   <PresentChip
                     key={e.empCode}
                     employee={e}
-                    attendance={attMap.get(e.empCode)}
+                    clockInTime={manualClockIns[e.empCode]}
                     onClick={() => openModalFor(e)}
                     draggable={false}
                     draggingEmpCode={draggingEmpCode}
@@ -378,7 +380,7 @@ export function DaerimClockInView() {
                   <PresentChip
                     key={e.empCode}
                     employee={e}
-                    attendance={attMap.get(e.empCode)}
+                    clockInTime={manualClockIns[e.empCode]}
                     onClick={() => openModalFor(e)}
                     draggable
                     draggingEmpCode={draggingEmpCode}
@@ -391,14 +393,14 @@ export function DaerimClockInView() {
         </div>
 
         {notClockedInTotal > 0 && (
-          <div className="w-60 flex-shrink-0 card border-amber-200 bg-amber-50/40 self-stretch">
+          <div className="w-56 flex-shrink-0 card border-amber-200 bg-amber-50/40 self-stretch">
             <h2 className="font-semibold text-slate-900 mb-3 text-sm">
               출근 전{" "}
               <span className="text-xs font-normal text-amber-700">
                 ({notClockedInTotal}명)
               </span>
             </h2>
-            <div className="space-y-4">
+            <div className="space-y-3">
               {(["소사장", "피더", "작업자"] as const).map((grp) => (
                 <NotClockedInGroup
                   key={grp}
@@ -438,23 +440,25 @@ function NotClockedInGroup({
 }) {
   return (
     <div>
-      <div className="font-bold text-slate-800 text-sm mb-2 border-b border-amber-300 pb-1 flex items-center justify-between">
+      <div className="font-bold text-slate-800 text-xs mb-1.5 border-b border-amber-300 pb-1 flex items-center justify-between">
         <span>{label}</span>
-        <span className="text-xs font-normal text-slate-500">
+        <span className="text-[10px] font-normal text-slate-500">
           {workers.length}명
         </span>
       </div>
-      <div className="flex flex-col gap-1.5">
+      <div className="grid grid-cols-2 gap-1">
         {workers.length === 0 ? (
-          <span className="text-xs text-slate-400 italic px-2">없음</span>
+          <span className="col-span-2 text-[11px] text-slate-400 italic px-1">
+            없음
+          </span>
         ) : (
           workers.map((e) => (
             <button
               key={e.empCode}
               type="button"
               onClick={() => onClickName(e)}
-              className="w-full px-3 py-1.5 rounded-md text-sm font-semibold border bg-white border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors text-center"
-              title={`${e.name}`}
+              className="px-1.5 py-1 rounded text-xs font-semibold border bg-white border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors text-center truncate"
+              title={e.name}
             >
               {e.name}
             </button>
@@ -468,7 +472,7 @@ function NotClockedInGroup({
 function LineCard({
   line,
   workers,
-  attMap,
+  manualClockIns,
   onChipClick,
   onDropWorker,
   draggingEmpCode,
@@ -476,7 +480,7 @@ function LineCard({
 }: {
   line: string;
   workers: Employee[];
-  attMap: Map<string, AttendanceRecord>;
+  manualClockIns: Record<string, string>;
   onChipClick: (e: Employee) => void;
   onDropWorker: (empCode: string, name: string) => void;
   draggingEmpCode: string | null;
@@ -535,7 +539,7 @@ function LineCard({
             <PresentChip
               key={e.empCode}
               employee={e}
-              attendance={attMap.get(e.empCode)}
+              clockInTime={manualClockIns?.[e.empCode]}
               onClick={() => onChipClick(e)}
               draggable
               draggingEmpCode={draggingEmpCode}
@@ -550,20 +554,20 @@ function LineCard({
 
 function PresentChip({
   employee,
-  attendance,
+  clockInTime,
   onClick,
   draggable,
   draggingEmpCode,
   setDraggingEmpCode,
 }: {
   employee: Employee;
-  attendance: AttendanceRecord | undefined;
+  clockInTime: string | undefined;
   onClick: () => void;
   draggable: boolean;
   draggingEmpCode: string | null;
   setDraggingEmpCode: (s: string | null) => void;
 }) {
-  const timeLabel = formatTime(attendance?.startTime);
+  const timeLabel = formatTime(clockInTime);
   const isDragging = draggingEmpCode === employee.empCode;
 
   const handleDragStart = (e: React.DragEvent) => {
@@ -604,6 +608,13 @@ function PresentChip({
 function formatTime(value: number | string | null | undefined): string {
   if (value === null || value === undefined || value === "") return "";
   if (typeof value === "string") {
+    // ISO datetime (e.g. 2026-06-19T08:30:00.000Z)
+    if (value.includes("T") || value.includes("-")) {
+      const d = new Date(value);
+      if (!isNaN(d.getTime())) {
+        return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+      }
+    }
     const m = value.match(/^(\d{1,2}):(\d{2})/);
     if (m) return `${m[1].padStart(2, "0")}:${m[2]}`;
     return value;
