@@ -80,6 +80,7 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
     supportingNow,
     supportingElsewhere,
     receivedFromOthers,
+    receivedEmpCodeSet,
     notClockedInGroups,
     notClockedInTotal,
     defaultSlotMap,
@@ -146,12 +147,16 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
     //   targetEmps 에 이미 포함된 인원(우리 정규 구성원)은 위 루프에서 처리됐으므로 skip
     const ownTargetSet = new Set(targetEmps.map((e) => e.empCode));
     const receivedFromOthers: Employee[] = [];
+    // 받은 지원자 사원코드 집합 — 슬롯에 배치돼도 다른 색으로 표시하기 위함
+    const receivedEmpCodeSet = new Set<string>();
     for (const e of employees) {
       if (ownTargetSet.has(e.empCode)) continue; // 우리 정규 구성원 — 이미 처리
       const isPresent = !!manualClockIns[e.empCode];
       if (!isPresent) continue;
       const target = supportTargetMap[e.empCode];
       if (!target || !selfLineSet.has(target)) continue;
+
+      receivedEmpCodeSet.add(e.empCode);
 
       const overrideVal = currentLineOverrides[e.empCode];
       if (!overrideVal || overrideVal === "지원") {
@@ -193,6 +198,7 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
       supportingNow,
       supportingElsewhere,
       receivedFromOthers,
+      receivedEmpCodeSet,
       notClockedInGroups: {
         소사장: sajangNot,
         피더: feederNot,
@@ -343,6 +349,7 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
                   displayName={displayName(line)}
                   workers={presentBySlot.get(line) ?? []}
                   manualClockIns={manualClockIns}
+                  receivedEmpCodeSet={receivedEmpCodeSet}
                   onChipClick={openModalFor}
                   onDropWorker={(empCode, name) => handleDrop(line, empCode, name)}
                   draggingEmpCode={draggingEmpCode}
@@ -366,6 +373,7 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
                     key={e.empCode}
                     employee={e}
                     clockInTime={manualClockIns[e.empCode]}
+                    isReceived={receivedEmpCodeSet.has(e.empCode)}
                     onClick={() => openModalFor(e)}
                     draggable={false}
                     draggingEmpCode={draggingEmpCode}
@@ -608,6 +616,7 @@ function LineCard({
   displayName,
   workers,
   manualClockIns,
+  receivedEmpCodeSet,
   onChipClick,
   onDropWorker,
   draggingEmpCode,
@@ -617,6 +626,7 @@ function LineCard({
   displayName: string;
   workers: Employee[];
   manualClockIns: Record<string, string>;
+  receivedEmpCodeSet: Set<string>;
   onChipClick: (e: Employee) => void;
   onDropWorker: (empCode: string, name: string) => void;
   draggingEmpCode: string | null;
@@ -675,6 +685,7 @@ function LineCard({
               key={e.empCode}
               employee={e}
               clockInTime={manualClockIns[e.empCode]}
+              isReceived={receivedEmpCodeSet.has(e.empCode)}
               onClick={() => onChipClick(e)}
               draggable
               draggingEmpCode={draggingEmpCode}
@@ -690,6 +701,7 @@ function LineCard({
 function PresentChip({
   employee,
   clockInTime,
+  isReceived = false,
   onClick,
   draggable,
   draggingEmpCode,
@@ -697,6 +709,7 @@ function PresentChip({
 }: {
   employee: Employee;
   clockInTime: string | undefined;
+  isReceived?: boolean;
   onClick: () => void;
   draggable: boolean;
   draggingEmpCode: string | null;
@@ -724,11 +737,13 @@ function PresentChip({
       onClick={onClick}
       className={cn(
         "px-2.5 py-1.5 rounded-md text-xs font-semibold border transition-colors",
-        "bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200",
+        isReceived
+          ? "bg-indigo-100 border-indigo-300 text-indigo-800 hover:bg-indigo-200"
+          : "bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200",
         draggable && "cursor-grab active:cursor-grabbing",
         isDragging && "opacity-50"
       )}
-      title={`${employee.name} · 출근 ${timeLabel}${draggable ? " · 드래그로 라인 이동" : ""}`}
+      title={`${employee.name} · ${isReceived ? "받은 지원" : "출근"} ${timeLabel}${draggable ? " · 드래그로 라인 이동" : ""}`}
     >
       <span>{employee.name}</span>
       {timeLabel && (
