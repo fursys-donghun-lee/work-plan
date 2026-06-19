@@ -302,11 +302,12 @@ export const useDataStore = create<DataState>()(
       // setAttendance: 파일의 workDate 는 무시 (오늘 날짜는 SessionState 가 관리)
       setAttendance: (data, _workDate, meta) =>
         set({ attendance: data, attendanceMeta: meta }),
-      // 출근 — manualClockIns 에 timestamp 기록 + workLog + 기본 라인 override
-      //   (일일자료 attendance 와는 별개 — 클릭한 인원만 현장 대시보드에서 출근으로 표시)
+      // 출근 — manualClockIns + workLog + attendance (재배치 계획·메인 대시보드 반영)
+      //   현장 대시보드는 manualClockIns 만 보지만, 다른 화면은 attendance 를 보므로 둘 다 갱신
       clockInEmployee: (empCode, name, line) =>
         set((state) => {
           const now = new Date();
+          const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
           const logEntry: WorkLogEntry = {
             id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
             empCode,
@@ -316,10 +317,34 @@ export const useDataStore = create<DataState>()(
             action: "출근",
             line: line || "",
           };
+          // attendance 갱신
+          const idx = state.attendance.findIndex((a) => a.empCode === empCode);
+          let nextAttendance: AttendanceRecord[];
+          if (idx >= 0) {
+            nextAttendance = [...state.attendance];
+            nextAttendance[idx] = {
+              ...nextAttendance[idx],
+              startTime: hhmm,
+              isPresent: true,
+              name: nextAttendance[idx].name || name,
+            };
+          } else {
+            nextAttendance = [
+              ...state.attendance,
+              {
+                empCode,
+                name,
+                workDate: state.workDate,
+                startTime: hhmm,
+                isPresent: true,
+              },
+            ];
+          }
           const nextOverrides = line
             ? { ...state.currentLineOverrides, [empCode]: line }
             : state.currentLineOverrides;
           return {
+            attendance: nextAttendance,
             workLog: [...state.workLog, logEntry],
             manualClockIns: {
               ...state.manualClockIns,
@@ -328,7 +353,7 @@ export const useDataStore = create<DataState>()(
             currentLineOverrides: nextOverrides,
           };
         }),
-      // 퇴근 — manualClockIns 에서 제거 + workLog + override 제거
+      // 퇴근 — manualClockIns + attendance + override 모두 정리
       clockOutEmployee: (empCode, name, line) =>
         set((state) => {
           const now = new Date();
@@ -341,6 +366,16 @@ export const useDataStore = create<DataState>()(
             action: "퇴근",
             line: line || "",
           };
+          const idx = state.attendance.findIndex((a) => a.empCode === empCode);
+          let nextAttendance = state.attendance;
+          if (idx >= 0) {
+            nextAttendance = [...state.attendance];
+            nextAttendance[idx] = {
+              ...nextAttendance[idx],
+              isPresent: false,
+              startTime: null,
+            };
+          }
           const nextClockIns = { ...state.manualClockIns };
           delete nextClockIns[empCode];
           const nextOverrides = { ...state.currentLineOverrides };
@@ -348,6 +383,7 @@ export const useDataStore = create<DataState>()(
           const nextSupport = { ...state.supportTargetMap };
           delete nextSupport[empCode];
           return {
+            attendance: nextAttendance,
             workLog: [...state.workLog, logEntry],
             manualClockIns: nextClockIns,
             currentLineOverrides: nextOverrides,
