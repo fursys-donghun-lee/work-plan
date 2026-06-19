@@ -42,6 +42,7 @@ interface ModalState {
   name: string;
   currentLine: string;
   isPresent: boolean;
+  isSupporting: boolean;
 }
 
 export function ClockInView({ config }: { config: ClockInConfig }) {
@@ -68,6 +69,7 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
     name: "",
     currentLine: "",
     isPresent: false,
+    isSupporting: false,
   });
   const [draggingEmpCode, setDraggingEmpCode] = useState<string | null>(null);
 
@@ -208,12 +210,14 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
   const openModalFor = (e: Employee) => {
     const isPresent = !!manualClockIns[e.empCode];
     const currentLine = currentSlotMap.get(e.empCode) || "";
+    const isSupporting = currentLine === "지원";
     setModal({
       open: true,
       empCode: e.empCode,
       name: e.name,
       currentLine,
       isPresent,
+      isSupporting,
     });
   };
   const closeModal = () => setModal((m) => ({ ...m, open: false }));
@@ -229,6 +233,12 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
   };
   const handleSupport = (targetLine: SupportTargetLineName) => {
     logSupport(modal.empCode, modal.name, modal.currentLine, targetLine);
+    closeModal();
+  };
+  const handleReturn = () => {
+    // 지원 상태 해제 → 기본 라인으로 복귀 (moveWorkerLine 이 supportTargetMap 정리)
+    const defaultLine = defaultSlotMap.get(modal.empCode) || "";
+    moveWorkerLine(modal.empCode, modal.name, "지원", defaultLine);
     closeModal();
   };
 
@@ -422,10 +432,12 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
         workerEmpCode={modal.empCode}
         currentLine={modal.currentLine}
         isPresent={modal.isPresent}
+        isSupporting={modal.isSupporting}
         onClose={closeModal}
         onClockIn={handleClockIn}
         onClockOut={handleClockOut}
         onSupport={handleSupport}
+        onReturn={handleReturn}
       />
     </div>
   );

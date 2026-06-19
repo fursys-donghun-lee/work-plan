@@ -10,10 +10,12 @@ interface Props {
   workerEmpCode: string;
   currentLine: string;
   isPresent: boolean;
+  isSupporting: boolean;
   onClose: () => void;
   onClockIn: () => void;
   onClockOut: () => void;
   onSupport: (targetLine: SupportTargetLineName) => void;
+  onReturn: () => void;
 }
 
 // 직원 이름 클릭 시 표시되는 액션 선택 모달 — 출근/퇴근/지원
@@ -24,10 +26,12 @@ export function ActionModal({
   workerEmpCode,
   currentLine,
   isPresent,
+  isSupporting,
   onClose,
   onClockIn,
   onClockOut,
   onSupport,
+  onReturn,
 }: Props) {
   const [stage, setStage] = useState<"main" | "supportSelect">("main");
 
@@ -80,12 +84,20 @@ export function ActionModal({
         {stage === "main" ? (
           <>
             <div className="grid grid-cols-3 gap-2 mb-3">
-              <ActionButton
-                label="출근"
-                tone="emerald"
-                disabled={isPresent}
-                onClick={onClockIn}
-              />
+              {isSupporting ? (
+                <ActionButton
+                  label="복귀"
+                  tone="emerald"
+                  onClick={onReturn}
+                />
+              ) : (
+                <ActionButton
+                  label="출근"
+                  tone="emerald"
+                  disabled={isPresent}
+                  onClick={onClockIn}
+                />
+              )}
               <ActionButton
                 label="퇴근"
                 tone="rose"
@@ -93,7 +105,7 @@ export function ActionModal({
                 onClick={onClockOut}
               />
               <ActionButton
-                label="지원"
+                label={isSupporting ? "지원 변경" : "지원"}
                 tone="blue"
                 disabled={!isPresent}
                 onClick={() => setStage("supportSelect")}
