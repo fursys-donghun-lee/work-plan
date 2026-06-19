@@ -86,6 +86,7 @@ export function DaerimClockInView() {
   const workDate = useDataStore((s) => s.workDate);
   const packagePosition = useDataStore((s) => s.packagePosition);
   const clockInEmployee = useDataStore((s) => s.clockInEmployee);
+  const clockOutEmployee = useDataStore((s) => s.clockOutEmployee);
 
   // 대림 직원 추출 + 출근 lookup + 슬롯 매핑 + 미출근 그룹화
   const {
@@ -250,7 +251,7 @@ export function DaerimClockInView() {
                   line={line}
                   workers={presentBySlot.get(line) ?? []}
                   attMap={attMap}
-                  onClockIn={clockInEmployee}
+                  onClockOut={clockOutEmployee}
                 />
               ))}
             </div>
@@ -267,11 +268,11 @@ export function DaerimClockInView() {
               </h2>
               <div className="flex flex-wrap gap-2">
                 {presentOthers.map((e) => (
-                  <WorkerChip
+                  <PresentChip
                     key={e.empCode}
                     employee={e}
                     attendance={attMap.get(e.empCode)}
-                    onClockIn={clockInEmployee}
+                    onClockOut={clockOutEmployee}
                   />
                 ))}
               </div>
@@ -347,12 +348,12 @@ function LineCard({
   line,
   workers,
   attMap,
-  onClockIn,
+  onClockOut,
 }: {
   line: string;
   workers: Employee[];
   attMap: Map<string, AttendanceRecord>;
-  onClockIn: (empCode: string, name: string) => void;
+  onClockOut: (empCode: string) => void;
 }) {
   // workers 는 이미 출근한 직원만 들어옴
   return (
@@ -375,11 +376,11 @@ function LineCard({
           <div className="text-xs text-slate-400 italic">대기 중</div>
         ) : (
           workers.map((e) => (
-            <WorkerChip
+            <PresentChip
               key={e.empCode}
               employee={e}
               attendance={attMap.get(e.empCode)}
-              onClockIn={onClockIn}
+              onClockOut={onClockOut}
             />
           ))
         )}
@@ -388,51 +389,39 @@ function LineCard({
   );
 }
 
-function WorkerChip({
+// 출근한 직원 칩 — 라인 그리드 / 기타 카드에서 사용. 클릭하면 출근 취소
+function PresentChip({
   employee,
   attendance,
-  onClockIn,
+  onClockOut,
 }: {
   employee: Employee;
   attendance: AttendanceRecord | undefined;
-  onClockIn: (empCode: string, name: string) => void;
+  onClockOut: (empCode: string) => void;
 }) {
-  const isPresent = !!attendance?.isPresent;
-  const timeLabel = isPresent ? formatTime(attendance?.startTime) : "";
+  const timeLabel = formatTime(attendance?.startTime);
 
   const handleClick = () => {
-    if (isPresent) {
-      // 이미 출근됨 — 다시 누르면 시간 갱신
-      if (
-        !window.confirm(
-          `${employee.name} 출근 시각을 지금 시각으로 다시 찍을까요?`
-        )
-      ) {
-        return;
-      }
+    if (
+      !window.confirm(
+        `${employee.name} 출근을 취소할까요? (대기자 목록으로 돌아갑니다)`
+      )
+    ) {
+      return;
     }
-    onClockIn(employee.empCode, employee.name);
+    onClockOut(employee.empCode);
   };
 
   return (
     <button
       type="button"
       onClick={handleClick}
-      className={cn(
-        "px-2.5 py-1.5 rounded-md text-xs font-semibold border transition-colors",
-        isPresent
-          ? "bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200"
-          : "bg-slate-50 border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700"
-      )}
-      title={
-        isPresent
-          ? `${employee.name} · 출근 ${timeLabel} (눌러서 시간 갱신)`
-          : `${employee.name} · 눌러서 출근`
-      }
+      className="px-2.5 py-1.5 rounded-md text-xs font-semibold border bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-rose-50 hover:border-rose-300 hover:text-rose-700 transition-colors"
+      title={`${employee.name} · 출근 ${timeLabel} (눌러서 출근 취소)`}
     >
       <span>{employee.name}</span>
       {timeLabel && (
-        <span className="ml-1.5 text-[10px] font-normal text-emerald-700">
+        <span className="ml-1.5 text-[10px] font-normal opacity-80">
           {timeLabel}
         </span>
       )}
