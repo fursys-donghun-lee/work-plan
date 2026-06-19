@@ -16,6 +16,7 @@ const NAV_ITEMS_BY_COMPANY: Record<Company, { href: string; label: string }[]> =
   우성산업: [
     { href: "/", label: "메인 대시보드" },
     { href: "/clock-in", label: "현장 대시보드" },
+    { href: "/work-log", label: "인원별 근무관리" },
     { href: "/workgroups", label: "그룹별 부하" },
     { href: "/equipment", label: "설비별 부하" },
   ],
@@ -23,6 +24,8 @@ const NAV_ITEMS_BY_COMPANY: Record<Company, { href: string; label: string }[]> =
     { href: "/", label: "메인 대시보드" },
     { href: "/clock-in/package1", label: "포장1 현장" },
     { href: "/clock-in/paint", label: "도장 현장" },
+    { href: "/work-log/package1", label: "포장1 근무관리" },
+    { href: "/work-log/paint", label: "도장 근무관리" },
     { href: "/paint-line", label: "도장라인 부하" },
     { href: "/plan", label: "재배치 계획" },
     { href: "/package-line", label: "포장1라인 부하" },

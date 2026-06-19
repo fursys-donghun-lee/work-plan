@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useHydrated } from "@/components/useComputed";
 import { cn } from "@/lib/utils";
-import type { WorkLogEntry, WorkLogAction } from "@/lib/types";
+import type { Employee, WorkLogEntry, WorkLogAction } from "@/lib/types";
 
 const ACTION_TONE: Record<WorkLogAction, string> = {
   출근: "bg-emerald-100 text-emerald-800 border-emerald-300",
@@ -28,22 +28,32 @@ function formatHHMM(iso: string): string {
   }
 }
 
-export function WorkLogView() {
+export interface WorkLogViewProps {
+  title: string;
+  description?: string;
+  // 이 페이지에 포함할 직원 필터 (회사 + 카테고리)
+  employeeFilter: (e: Employee) => boolean;
+}
+
+export function WorkLogView({
+  title,
+  description,
+  employeeFilter,
+}: WorkLogViewProps) {
   const hydrated = useHydrated();
   const workLog = useDataStore((s) => s.workLog);
   const employees = useDataStore((s) => s.employees);
   const [selectedDate, setSelectedDate] = useState<string>(todayStr);
 
-  // 대림 직원 사원코드 집합
-  const daerimEmpCodes = useMemo(() => {
+  // 필터 매칭되는 직원 사원코드 집합
+  const targetEmpCodes = useMemo(() => {
     const s = new Set<string>();
     for (const e of employees) {
-      if (e.department.includes("대림산업")) s.add(e.empCode);
+      if (employeeFilter(e)) s.add(e.empCode);
     }
     return s;
-  }, [employees]);
+  }, [employees, employeeFilter]);
 
-  // 일자별로 그룹화 — 선택 일자 + 사용 가능 일자 목록
   const { entriesByEmp, allDates } = useMemo(() => {
     const dates = new Set<string>();
     for (const e of workLog) dates.add(e.workDate);
@@ -52,11 +62,10 @@ export function WorkLogView() {
     const byEmp = new Map<string, WorkLogEntry[]>();
     for (const e of workLog) {
       if (e.workDate !== selectedDate) continue;
-      if (!daerimEmpCodes.has(e.empCode)) continue;
+      if (!targetEmpCodes.has(e.empCode)) continue;
       if (!byEmp.has(e.empCode)) byEmp.set(e.empCode, []);
       byEmp.get(e.empCode)!.push(e);
     }
-    // 사람별 timestamp 오름차순
     for (const arr of byEmp.values()) {
       arr.sort((a, b) => a.timestamp.localeCompare(b.timestamp));
     }
@@ -65,9 +74,8 @@ export function WorkLogView() {
       entriesByEmp: byEmp,
       allDates: Array.from(dates).sort().reverse(),
     };
-  }, [workLog, daerimEmpCodes, selectedDate]);
+  }, [workLog, targetEmpCodes, selectedDate]);
 
-  // 직원별 sort — 활동 있는 사람만, 첫 출근 시각 오름차순
   const sortedEmps = useMemo(() => {
     const arr = Array.from(entriesByEmp.entries());
     arr.sort(([, aLog], [, bLog]) => {
@@ -84,12 +92,10 @@ export function WorkLogView() {
     <div className="space-y-5">
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            대림산업 · 인원별 근무관리
-          </h1>
+          <h1 className="text-2xl font-bold text-slate-900">{title}</h1>
           <p className="text-sm text-slate-500 mt-1">
-            출근·퇴근·지원·이동 이력 — 출근 체크 탭에서 발생한 모든 액션이
-            여기 기록됩니다
+            {description ??
+              "출근·퇴근·지원·이동 이력 — 현장 대시보드에서 발생한 모든 액션이 여기 기록됩니다"}
           </p>
         </div>
         <div className="flex items-center gap-2">
