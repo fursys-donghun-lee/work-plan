@@ -371,12 +371,12 @@ export interface WorkLogEntry {
 export type CurrentLineOverrides = Record<string, string>;
 
 // 지원 대상 라인 (현장 대시보드 지원 풀 라우팅용)
+//  · 도장1·도장2 는 하나의 도장라인 대시보드로 통합 라우팅
 export const SUPPORT_TARGET_LINES = [
-  "도장1라인",
-  "도장2라인",
+  "가공라인",
+  "도장라인",
   "포장1라인",
   "포장2라인",
-  "가공라인",
 ] as const;
 export type SupportTargetLineName = (typeof SUPPORT_TARGET_LINES)[number];
 

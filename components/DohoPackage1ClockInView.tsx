@@ -3,11 +3,13 @@
 import { ClockInView, type ClockInConfig } from "@/components/ClockInView";
 import type { Employee } from "@/lib/types";
 
-// 슬롯 키 (사용자 지정 그리드) — packagePosition.position 의 "포장1(...)" 매핑
+// 슬롯 키 (사용자 지정 그리드) — 5행 배치 (마지막 행에 물류)
 const LINE_GRID: string[][] = [
-  ["기타1", "기타2", "CR1", "CR2"],
+  ["기타1", "기타2"],
+  ["CR1", "CR2"],
   ["침대", "HSOD"],
   ["타일", "마감1", "마감2"],
+  ["물류"],
 ];
 const GRID_LINES = new Set<string>(LINE_GRID.flat());
 
@@ -25,9 +27,10 @@ const POSITION_TO_SLOT: Record<string, string> = {
 };
 
 function slotFor(e: Employee, packagePos: Map<string, string>): string {
+  // 물류 카테고리는 항상 물류 슬롯
+  if (e.category === "물류") return "물류";
   const pkgPos = packagePos.get(e.empCode);
   if (pkgPos && POSITION_TO_SLOT[pkgPos]) return POSITION_TO_SLOT[pkgPos];
-  // baseLocation 이 슬롯 키와 같은 경우 fallback
   const loc = (e.baseLocation || "").trim();
   if (GRID_LINES.has(loc)) return loc;
   return "기타";
@@ -38,9 +41,8 @@ function classifyGroup(
   packagePos: Map<string, string>
 ): "소사장" | "피더" | "작업자" | null {
   if (e.category.includes("사장")) return "소사장";
-  // 피더 = packagePosition.position === '피더'
   if (packagePos.get(e.empCode) === "피더") return "피더";
-  if (e.category === "포장1라인") return "작업자";
+  if (e.category === "포장1라인" || e.category === "물류") return "작업자";
   return null;
 }
 
@@ -52,6 +54,8 @@ const config: ClockInConfig = {
   lineGrid: LINE_GRID,
   slotFor,
   classifyGroup,
+  // 다호산업 중 구분이 포장1라인 / 물류 인 직원만 노출
+  categoryFilter: (e) => e.category === "포장1라인" || e.category === "물류",
 };
 
 export function DohoPackage1ClockInView() {

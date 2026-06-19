@@ -21,7 +21,7 @@ export interface ClockInConfig {
   // 라인 → 지원 풀로 드롭 시 기록될 기본 라인 (selfLines[0])
   defaultSupportTarget: SupportTargetLineName;
   pageTitle: string; // h1 제목 (예: "대림산업 · 현장 대시보드")
-  lineGrid: string[][]; // 4행 라인 그리드
+  lineGrid: string[][]; // 라인 그리드 (각 행은 임의 길이)
   // 직원의 슬롯 결정 (line grid 의 한 슬롯명 OR "기타")
   slotFor: (e: Employee, packagePos: Map<string, string>) => string;
   // 직원의 우측 패널 그룹 분류
@@ -31,6 +31,9 @@ export interface ClockInConfig {
   ) => "소사장" | "피더" | "작업자" | null;
   // 라인 슬롯 표시명 (선택). 없으면 그대로 사용
   displayLineName?: (line: string) => string;
+  // 직원 필터 (선택) — true 인 직원만 대시보드에 노출 (구분 필터 등)
+  //   companyDept 매칭 이후 추가로 적용됨
+  categoryFilter?: (e: Employee) => boolean;
 }
 
 interface ModalState {
@@ -80,9 +83,11 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
     currentSlotMap,
     stats,
   } = useMemo(() => {
-    const targetEmps = employees.filter((e) =>
-      e.department.includes(config.companyDept)
-    );
+    const targetEmps = employees.filter((e) => {
+      if (!e.department.includes(config.companyDept)) return false;
+      if (config.categoryFilter && !config.categoryFilter(e)) return false;
+      return true;
+    });
     const pkgPosMap = new Map<string, string>();
     for (const p of packagePosition) {
       if (p.empCode) pkgPosMap.set(p.empCode, p.position || "");
