@@ -1,0 +1,722 @@
+"use client";
+
+import { useMemo, useState } from "react";
+import { useDataStore } from "@/lib/store/useDataStore";
+import { useHydrated } from "@/components/useComputed";
+import { EmptyState } from "@/components/EmptyState";
+import { ActionModal } from "@/components/ActionModal";
+import { cn } from "@/lib/utils";
+import type { Employee, SupportTargetLineName } from "@/lib/types";
+
+export interface ClockInGroup {
+  소사장: Employee[];
+  피더: Employee[];
+  작업자: Employee[];
+}
+
+export interface ClockInConfig {
+  companyDept: string; // 부서명 매칭 (예: "대림산업", "다호산업")
+  // 이 대시보드가 받을 수 있는 지원 라인 (지원 풀 필터링)
+  selfLines: SupportTargetLineName[];
+  // 라인 → 지원 풀로 드롭 시 기록될 기본 라인 (selfLines[0])
+  defaultSupportTarget: SupportTargetLineName;
+  pageTitle: string; // h1 제목 (예: "대림산업 · 현장 대시보드")
+  lineGrid: string[][]; // 4행 라인 그리드
+  // 직원의 슬롯 결정 (line grid 의 한 슬롯명 OR "기타")
+  slotFor: (e: Employee, packagePos: Map<string, string>) => string;
+  // 직원의 우측 패널 그룹 분류
+  classifyGroup: (
+    e: Employee,
+    packagePos: Map<string, string>
+  ) => "소사장" | "피더" | "작업자" | null;
+  // 라인 슬롯 표시명 (선택). 없으면 그대로 사용
+  displayLineName?: (line: string) => string;
+}
+
+interface ModalState {
+  open: boolean;
+  empCode: string;
+  name: string;
+  currentLine: string;
+  isPresent: boolean;
+}
+
+export function ClockInView({ config }: { config: ClockInConfig }) {
+  const hydrated = useHydrated();
+  const employees = useDataStore((s) => s.employees);
+  const workDate = useDataStore((s) => s.workDate);
+  const packagePosition = useDataStore((s) => s.packagePosition);
+  const currentLineOverrides = useDataStore((s) => s.currentLineOverrides);
+  const manualClockIns = useDataStore((s) => s.manualClockIns);
+  const supportTargetMap = useDataStore((s) => s.supportTargetMap);
+  const clockInEmployee = useDataStore((s) => s.clockInEmployee);
+  const clockOutEmployee = useDataStore((s) => s.clockOutEmployee);
+  const logSupport = useDataStore((s) => s.logSupport);
+  const moveWorkerLine = useDataStore((s) => s.moveWorkerLine);
+
+  const GRID_LINES = useMemo(
+    () => new Set<string>(config.lineGrid.flat()),
+    [config.lineGrid]
+  );
+
+  const [modal, setModal] = useState<ModalState>({
+    open: false,
+    empCode: "",
+    name: "",
+    currentLine: "",
+    isPresent: false,
+  });
+  const [draggingEmpCode, setDraggingEmpCode] = useState<string | null>(null);
+
+  const {
+    presentBySlot,
+    presentOthers,
+    supportingNow,
+    supportingElsewhere,
+    receivedFromOthers,
+    notClockedInGroups,
+    notClockedInTotal,
+    defaultSlotMap,
+    currentSlotMap,
+    stats,
+  } = useMemo(() => {
+    const targetEmps = employees.filter((e) =>
+      e.department.includes(config.companyDept)
+    );
+    const pkgPosMap = new Map<string, string>();
+    for (const p of packagePosition) {
+      if (p.empCode) pkgPosMap.set(p.empCode, p.position || "");
+    }
+
+    const presentBySlot = new Map<string, Employee[]>();
+    const presentOthers: Employee[] = [];
+    const supportingNow: Employee[] = []; // 우리 라인 지원하는 우리 직원
+    const supportingElsewhere: Employee[] = []; // 타 라인 지원하는 우리 직원
+    const sajangNot: Employee[] = [];
+    const feederNot: Employee[] = [];
+    const workerNot: Employee[] = [];
+
+    const defaultSlotMap = new Map<string, string>();
+    const currentSlotMap = new Map<string, string>();
+
+    const selfLineSet = new Set<string>(config.selfLines);
+
+    for (const e of targetEmps) {
+      const def = config.slotFor(e, pkgPosMap);
+      defaultSlotMap.set(e.empCode, def);
+      const overrideVal = currentLineOverrides[e.empCode];
+      const cur =
+        overrideVal !== undefined && overrideVal !== "" ? overrideVal : def;
+      currentSlotMap.set(e.empCode, cur);
+
+      const isPresent = !!manualClockIns[e.empCode];
+      if (!isPresent) {
+        const grp = config.classifyGroup(e, pkgPosMap);
+        if (grp === "소사장") sajangNot.push(e);
+        else if (grp === "피더") feederNot.push(e);
+        else if (grp === "작업자") workerNot.push(e);
+        continue;
+      }
+      if (cur === "지원") {
+        const target = supportTargetMap[e.empCode];
+        if (target && selfLineSet.has(target)) {
+          supportingNow.push(e);
+        } else {
+          supportingElsewhere.push(e);
+        }
+      } else if (cur === "기타" || !GRID_LINES.has(cur)) {
+        presentOthers.push(e);
+      } else {
+        if (!presentBySlot.has(cur)) presentBySlot.set(cur, []);
+        presentBySlot.get(cur)!.push(e);
+      }
+    }
+
+    // 다른 회사 직원 중 우리 라인 지원하러 온 인원 (받은 지원)
+    const receivedFromOthers: Employee[] = [];
+    for (const e of employees) {
+      if (e.department.includes(config.companyDept)) continue;
+      const isPresent = !!manualClockIns[e.empCode];
+      if (!isPresent) continue;
+      const overrideVal = currentLineOverrides[e.empCode];
+      if (overrideVal !== "지원") continue;
+      const target = supportTargetMap[e.empCode];
+      if (!target || !selfLineSet.has(target)) continue;
+      receivedFromOthers.push(e);
+    }
+
+    const cmp = (a: Employee, b: Employee) =>
+      a.name.localeCompare(b.name, "ko");
+    for (const arr of presentBySlot.values()) arr.sort(cmp);
+    presentOthers.sort(cmp);
+    supportingNow.sort(cmp);
+    supportingElsewhere.sort(cmp);
+    receivedFromOthers.sort(cmp);
+    sajangNot.sort(cmp);
+    feederNot.sort(cmp);
+    workerNot.sort(cmp);
+
+    const notClockedInTotal =
+      sajangNot.length + feederNot.length + workerNot.length;
+    const total = targetEmps.length;
+    const present = total - notClockedInTotal;
+
+    return {
+      presentBySlot,
+      presentOthers,
+      supportingNow,
+      supportingElsewhere,
+      receivedFromOthers,
+      notClockedInGroups: {
+        소사장: sajangNot,
+        피더: feederNot,
+        작업자: workerNot,
+      },
+      notClockedInTotal,
+      defaultSlotMap,
+      currentSlotMap,
+      stats: { total, present, absent: notClockedInTotal },
+    };
+  }, [
+    employees,
+    packagePosition,
+    currentLineOverrides,
+    manualClockIns,
+    supportTargetMap,
+    GRID_LINES,
+    config,
+  ]);
+
+  if (!hydrated) return null;
+
+  if (employees.length === 0) {
+    return (
+      <EmptyState
+        title="기준자료가 필요합니다"
+        description={`${config.companyDept} 직원 정보를 보려면 먼저 근무기준을 업로드하세요.`}
+        ctaLabel="기준자료 업로드"
+        ctaHref="/master-data"
+      />
+    );
+  }
+
+  const openModalFor = (e: Employee) => {
+    const isPresent = !!manualClockIns[e.empCode];
+    const currentLine = currentSlotMap.get(e.empCode) || "";
+    setModal({
+      open: true,
+      empCode: e.empCode,
+      name: e.name,
+      currentLine,
+      isPresent,
+    });
+  };
+  const closeModal = () => setModal((m) => ({ ...m, open: false }));
+
+  const handleClockIn = () => {
+    const defaultLine = defaultSlotMap.get(modal.empCode) || "";
+    clockInEmployee(modal.empCode, modal.name, defaultLine);
+    closeModal();
+  };
+  const handleClockOut = () => {
+    clockOutEmployee(modal.empCode, modal.name, modal.currentLine);
+    closeModal();
+  };
+  const handleSupport = (targetLine: SupportTargetLineName) => {
+    logSupport(modal.empCode, modal.name, modal.currentLine, targetLine);
+    closeModal();
+  };
+
+  const handleDrop = (toLine: string, empCode: string, name: string) => {
+    const fromLine = currentSlotMap.get(empCode) || "";
+    if (fromLine === toLine) return;
+    moveWorkerLine(empCode, name, fromLine, toLine);
+  };
+
+  const displayName = (line: string) =>
+    config.displayLineName ? config.displayLineName(line) : line;
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-end justify-between flex-wrap gap-3">
+        <div>
+          <h1 className="text-2xl font-bold text-slate-900">
+            {config.pageTitle}
+          </h1>
+          <p className="text-sm text-slate-500 mt-1">
+            근무일자{" "}
+            <span className="font-semibold">{workDate || "(미지정)"}</span>
+            <span className="ml-3 text-slate-400">
+              이름 클릭으로 출근·퇴근·지원 / 드래그앤드롭으로 라인 이동
+            </span>
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <div className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
+            <div className="text-[11px] text-slate-500">총인원</div>
+            <div className="text-lg font-bold text-slate-800">
+              {stats.total}명
+            </div>
+          </div>
+          <div className="px-3 py-1.5 rounded-lg bg-emerald-50 border border-emerald-200">
+            <div className="text-[11px] text-emerald-600">출근</div>
+            <div className="text-lg font-bold text-emerald-700">
+              {stats.present}명
+            </div>
+          </div>
+          <div
+            className={cn(
+              "px-3 py-1.5 rounded-lg border",
+              stats.absent > 0
+                ? "bg-rose-50 border-rose-200"
+                : "bg-slate-50 border-slate-200"
+            )}
+          >
+            <div
+              className={cn(
+                "text-[11px]",
+                stats.absent > 0 ? "text-rose-600" : "text-slate-500"
+              )}
+            >
+              미출근
+            </div>
+            <div
+              className={cn(
+                "text-lg font-bold",
+                stats.absent > 0 ? "text-rose-700" : "text-slate-800"
+              )}
+            >
+              {stats.absent}명
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="flex gap-4 items-start">
+        <div className="flex-1 min-w-0 space-y-3">
+          {config.lineGrid.map((row, ri) => (
+            <div
+              key={ri}
+              className="grid gap-3"
+              style={{
+                gridTemplateColumns: `repeat(${row.length}, minmax(0, 1fr))`,
+              }}
+            >
+              {row.map((line) => (
+                <LineCard
+                  key={line}
+                  line={line}
+                  displayName={displayName(line)}
+                  workers={presentBySlot.get(line) ?? []}
+                  manualClockIns={manualClockIns}
+                  onChipClick={openModalFor}
+                  onDropWorker={(empCode, name) => handleDrop(line, empCode, name)}
+                  draggingEmpCode={draggingEmpCode}
+                  setDraggingEmpCode={setDraggingEmpCode}
+                />
+              ))}
+            </div>
+          ))}
+
+          {presentOthers.length > 0 && (
+            <div className="rounded-lg border border-slate-200 bg-white p-3">
+              <h2 className="font-semibold text-slate-900 text-sm mb-2">
+                기타{" "}
+                <span className="text-xs font-normal text-slate-500">
+                  (사장님 · 라인 미지정)
+                </span>
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {presentOthers.map((e) => (
+                  <PresentChip
+                    key={e.empCode}
+                    employee={e}
+                    clockInTime={manualClockIns[e.empCode]}
+                    onClick={() => openModalFor(e)}
+                    draggable={false}
+                    draggingEmpCode={draggingEmpCode}
+                    setDraggingEmpCode={setDraggingEmpCode}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
+        {(notClockedInTotal > 0 ||
+          supportingNow.length > 0 ||
+          supportingElsewhere.length > 0 ||
+          receivedFromOthers.length > 0) && (
+          <div className="w-56 flex-shrink-0 card border-amber-200 bg-amber-50/40 self-stretch">
+            <h2 className="font-semibold text-slate-900 mb-3 text-sm">
+              대기 인원{" "}
+              <span className="text-xs font-normal text-amber-700">
+                (출근 전 {notClockedInTotal} · 지원{" "}
+                {supportingNow.length + receivedFromOthers.length})
+              </span>
+            </h2>
+            <div className="space-y-3">
+              {(["소사장", "피더", "작업자"] as const).map((grp) => (
+                <NotClockedInGroup
+                  key={grp}
+                  label={grp}
+                  workers={notClockedInGroups[grp]}
+                  onClickName={openModalFor}
+                />
+              ))}
+              <SupportPoolGroup
+                ownWorkers={supportingNow}
+                receivedWorkers={receivedFromOthers}
+                manualClockIns={manualClockIns}
+                onClickName={openModalFor}
+                onDropFromLine={(empCode, name) => {
+                  logSupport(
+                    empCode,
+                    name,
+                    currentSlotMap.get(empCode) || "",
+                    config.defaultSupportTarget
+                  );
+                }}
+                draggingEmpCode={draggingEmpCode}
+                setDraggingEmpCode={setDraggingEmpCode}
+              />
+              {supportingElsewhere.length > 0 && (
+                <div>
+                  <div className="font-bold text-slate-800 text-xs mb-1.5 border-b border-purple-300 pb-1 flex items-center justify-between">
+                    <span>타 라인 지원 중</span>
+                    <span className="text-[10px] font-normal text-slate-500">
+                      {supportingElsewhere.length}명
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    {supportingElsewhere.map((e) => {
+                      const target = supportTargetMap[e.empCode];
+                      return (
+                        <button
+                          key={e.empCode}
+                          type="button"
+                          onClick={() => openModalFor(e)}
+                          className="px-1.5 py-1 rounded text-xs font-semibold border bg-purple-100 border-purple-300 text-purple-800 hover:bg-purple-200 transition-colors text-center truncate"
+                          title={`${e.name} · 지원 → ${target}`}
+                        >
+                          {e.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+      </div>
+
+      <ActionModal
+        open={modal.open}
+        workerName={modal.name}
+        workerEmpCode={modal.empCode}
+        currentLine={modal.currentLine}
+        isPresent={modal.isPresent}
+        onClose={closeModal}
+        onClockIn={handleClockIn}
+        onClockOut={handleClockOut}
+        onSupport={handleSupport}
+      />
+    </div>
+  );
+}
+
+// ===== 헬퍼 컴포넌트 =====
+
+function NotClockedInGroup({
+  label,
+  workers,
+  onClickName,
+}: {
+  label: string;
+  workers: Employee[];
+  onClickName: (e: Employee) => void;
+}) {
+  return (
+    <div>
+      <div className="font-bold text-slate-800 text-xs mb-1.5 border-b border-amber-300 pb-1 flex items-center justify-between">
+        <span>{label}</span>
+        <span className="text-[10px] font-normal text-slate-500">
+          {workers.length}명
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        {workers.length === 0 ? (
+          <span className="col-span-2 text-[11px] text-slate-400 italic px-1">
+            없음
+          </span>
+        ) : (
+          workers.map((e) => (
+            <button
+              key={e.empCode}
+              type="button"
+              onClick={() => onClickName(e)}
+              className="px-1.5 py-1 rounded text-xs font-semibold border bg-white border-slate-300 text-slate-700 hover:bg-blue-50 hover:border-blue-400 hover:text-blue-700 transition-colors text-center truncate"
+              title={e.name}
+            >
+              {e.name}
+            </button>
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SupportPoolGroup({
+  ownWorkers,
+  receivedWorkers,
+  manualClockIns,
+  onClickName,
+  onDropFromLine,
+  draggingEmpCode,
+  setDraggingEmpCode,
+}: {
+  ownWorkers: Employee[];
+  receivedWorkers: Employee[]; // 다른 회사에서 지원받은 직원
+  manualClockIns: Record<string, string>;
+  onClickName: (e: Employee) => void;
+  onDropFromLine: (empCode: string, name: string) => void;
+  draggingEmpCode: string | null;
+  setDraggingEmpCode: (s: string | null) => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setHover(true);
+  };
+  const onDragLeave = () => setHover(false);
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setHover(false);
+    const raw = e.dataTransfer.getData("application/json");
+    if (!raw) return;
+    try {
+      const { empCode, name } = JSON.parse(raw) as {
+        empCode: string;
+        name: string;
+      };
+      onDropFromLine(empCode, name);
+    } catch {}
+  };
+
+  const all = [...ownWorkers, ...receivedWorkers];
+
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={cn(
+        "rounded transition-colors p-1.5 -m-1.5",
+        hover && "bg-blue-100 ring-2 ring-blue-300"
+      )}
+    >
+      <div className="font-bold text-slate-800 text-xs mb-1.5 border-b border-blue-300 pb-1 flex items-center justify-between">
+        <span>지원</span>
+        <span className="text-[10px] font-normal text-slate-500">
+          {all.length}명
+          {receivedWorkers.length > 0 && ` (받은 ${receivedWorkers.length})`}
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        {all.length === 0 ? (
+          <span className="col-span-2 text-[11px] text-slate-400 italic px-1">
+            {hover ? "여기로 놓으면 지원 처리" : "없음"}
+          </span>
+        ) : (
+          all.map((e) => {
+            const isDragging = draggingEmpCode === e.empCode;
+            const isReceived = receivedWorkers.includes(e);
+            const handleDragStart = (ev: React.DragEvent) => {
+              ev.dataTransfer.setData(
+                "application/json",
+                JSON.stringify({ empCode: e.empCode, name: e.name })
+              );
+              ev.dataTransfer.effectAllowed = "move";
+              setDraggingEmpCode(e.empCode);
+            };
+            const handleDragEnd = () => setDraggingEmpCode(null);
+            const hhmm = formatTime(manualClockIns[e.empCode]);
+            return (
+              <button
+                key={e.empCode}
+                type="button"
+                draggable
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onClick={() => onClickName(e)}
+                className={cn(
+                  "px-1.5 py-1 rounded text-xs font-semibold border transition-colors text-center truncate cursor-grab active:cursor-grabbing",
+                  isReceived
+                    ? "bg-indigo-100 border-indigo-300 text-indigo-800 hover:bg-indigo-200"
+                    : "bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200",
+                  isDragging && "opacity-50"
+                )}
+                title={`${e.name} · ${isReceived ? "받은 지원" : "지원"} ${hhmm}`}
+              >
+                {e.name}
+              </button>
+            );
+          })
+        )}
+      </div>
+    </div>
+  );
+}
+
+function LineCard({
+  line,
+  displayName,
+  workers,
+  manualClockIns,
+  onChipClick,
+  onDropWorker,
+  draggingEmpCode,
+  setDraggingEmpCode,
+}: {
+  line: string;
+  displayName: string;
+  workers: Employee[];
+  manualClockIns: Record<string, string>;
+  onChipClick: (e: Employee) => void;
+  onDropWorker: (empCode: string, name: string) => void;
+  draggingEmpCode: string | null;
+  setDraggingEmpCode: (s: string | null) => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setHover(true);
+  };
+  const onDragLeave = () => setHover(false);
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setHover(false);
+    const raw = e.dataTransfer.getData("application/json");
+    if (!raw) return;
+    try {
+      const { empCode, name } = JSON.parse(raw) as {
+        empCode: string;
+        name: string;
+      };
+      onDropWorker(empCode, name);
+    } catch {}
+  };
+
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={cn(
+        "rounded-lg border bg-white p-3 min-h-[120px] transition-colors",
+        hover
+          ? "border-blue-400 bg-blue-50/40 ring-2 ring-blue-200"
+          : "border-slate-200"
+      )}
+    >
+      <div className="flex items-center justify-between mb-2">
+        <div className="font-bold text-slate-800 text-sm">{displayName}</div>
+        <div
+          className={cn(
+            "text-xs font-semibold",
+            workers.length > 0 ? "text-emerald-700" : "text-slate-400"
+          )}
+        >
+          {workers.length}명
+        </div>
+      </div>
+      <div className="flex flex-wrap gap-1.5">
+        {workers.length === 0 ? (
+          <div className="text-xs text-slate-400 italic">대기 중</div>
+        ) : (
+          workers.map((e) => (
+            <PresentChip
+              key={e.empCode}
+              employee={e}
+              clockInTime={manualClockIns[e.empCode]}
+              onClick={() => onChipClick(e)}
+              draggable
+              draggingEmpCode={draggingEmpCode}
+              setDraggingEmpCode={setDraggingEmpCode}
+            />
+          ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function PresentChip({
+  employee,
+  clockInTime,
+  onClick,
+  draggable,
+  draggingEmpCode,
+  setDraggingEmpCode,
+}: {
+  employee: Employee;
+  clockInTime: string | undefined;
+  onClick: () => void;
+  draggable: boolean;
+  draggingEmpCode: string | null;
+  setDraggingEmpCode: (s: string | null) => void;
+}) {
+  const timeLabel = formatTime(clockInTime);
+  const isDragging = draggingEmpCode === employee.empCode;
+
+  const handleDragStart = (e: React.DragEvent) => {
+    e.dataTransfer.setData(
+      "application/json",
+      JSON.stringify({ empCode: employee.empCode, name: employee.name })
+    );
+    e.dataTransfer.effectAllowed = "move";
+    setDraggingEmpCode(employee.empCode);
+  };
+  const handleDragEnd = () => setDraggingEmpCode(null);
+
+  return (
+    <button
+      type="button"
+      draggable={draggable}
+      onDragStart={draggable ? handleDragStart : undefined}
+      onDragEnd={draggable ? handleDragEnd : undefined}
+      onClick={onClick}
+      className={cn(
+        "px-2.5 py-1.5 rounded-md text-xs font-semibold border transition-colors",
+        "bg-emerald-100 border-emerald-300 text-emerald-800 hover:bg-emerald-200",
+        draggable && "cursor-grab active:cursor-grabbing",
+        isDragging && "opacity-50"
+      )}
+      title={`${employee.name} · 출근 ${timeLabel}${draggable ? " · 드래그로 라인 이동" : ""}`}
+    >
+      <span>{employee.name}</span>
+      {timeLabel && (
+        <span className="ml-1.5 text-[10px] font-normal opacity-80">
+          {timeLabel}
+        </span>
+      )}
+    </button>
+  );
+}
+
+function formatTime(value: string | undefined): string {
+  if (!value) return "";
+  if (value.includes("T") || value.includes("-")) {
+    const d = new Date(value);
+    if (!isNaN(d.getTime())) {
+      return `${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+    }
+  }
+  const m = value.match(/^(\d{1,2}):(\d{2})/);
+  if (m) return `${m[1].padStart(2, "0")}:${m[2]}`;
+  return value;
+}
