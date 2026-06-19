@@ -368,7 +368,7 @@ export const useDataStore = create<DataState>()(
             currentLineOverrides: nextOverrides,
           };
         }),
-      // 지원 — workLog 에 '지원' 액션만 기록 (위치는 그대로 유지)
+      // 지원 — workLog 에 '지원' 액션 기록 + 라인에서 빠짐 (currentLineOverrides 에 '지원' 마킹)
       logSupport: (empCode, name, line) =>
         set((state) => {
           const now = new Date();
@@ -381,7 +381,13 @@ export const useDataStore = create<DataState>()(
             action: "지원",
             line: line || "",
           };
-          return { workLog: [...state.workLog, logEntry] };
+          return {
+            workLog: [...state.workLog, logEntry],
+            currentLineOverrides: {
+              ...state.currentLineOverrides,
+              [empCode]: "지원",
+            },
+          };
         }),
       // 드래그앤드롭 이동 — workLog 에 이동 기록 + currentLineOverrides 갱신
       moveWorkerLine: (empCode, name, fromLine, toLine) =>

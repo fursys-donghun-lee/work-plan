@@ -102,6 +102,7 @@ export function DaerimClockInView() {
   const {
     presentBySlot,
     presentOthers,
+    supportingNow,
     notClockedInGroups,
     notClockedInTotal,
     attMap,
@@ -122,6 +123,7 @@ export function DaerimClockInView() {
 
     const presentBySlot = new Map<string, Employee[]>();
     const presentOthers: Employee[] = [];
+    const supportingNow: Employee[] = [];
     const sajangNot: Employee[] = [];
     const feederNot: Employee[] = [];
     const workerNot: Employee[] = [];
@@ -140,7 +142,9 @@ export function DaerimClockInView() {
         pkgPosMap
       );
       defaultSlotMap.set(e.empCode, def);
-      const cur = currentLineOverrides[e.empCode] || def;
+      // override 가 빈 문자열이면 default 로 fallback
+      const overrideVal = currentLineOverrides[e.empCode];
+      const cur = overrideVal !== undefined && overrideVal !== "" ? overrideVal : def;
       currentSlotMap.set(e.empCode, cur);
 
       const isPresent = !!m.get(e.empCode)?.isPresent;
@@ -151,7 +155,9 @@ export function DaerimClockInView() {
         else if (grp === "작업자") workerNot.push(e);
         continue;
       }
-      if (cur === "기타" || !GRID_LINES.has(cur)) {
+      if (cur === "지원") {
+        supportingNow.push(e);
+      } else if (cur === "기타" || !GRID_LINES.has(cur)) {
         presentOthers.push(e);
       } else {
         if (!presentBySlot.has(cur)) presentBySlot.set(cur, []);
@@ -162,6 +168,7 @@ export function DaerimClockInView() {
     const cmp = (a: Employee, b: Employee) => a.name.localeCompare(b.name, "ko");
     for (const arr of presentBySlot.values()) arr.sort(cmp);
     presentOthers.sort(cmp);
+    supportingNow.sort(cmp);
     sajangNot.sort(cmp);
     feederNot.sort(cmp);
     workerNot.sort(cmp);
@@ -174,6 +181,7 @@ export function DaerimClockInView() {
     return {
       presentBySlot,
       presentOthers,
+      supportingNow,
       notClockedInGroups: { 소사장: sajangNot, 피더: feederNot, 작업자: workerNot },
       notClockedInTotal,
       attMap: m,
@@ -239,7 +247,7 @@ export function DaerimClockInView() {
       <div className="flex items-end justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            대림산업 · 출근 체크
+            대림산업 · 현장 대시보드
           </h1>
           <p className="text-sm text-slate-500 mt-1">
             근무일자{" "}
@@ -331,6 +339,48 @@ export function DaerimClockInView() {
                     attendance={attMap.get(e.empCode)}
                     onClick={() => openModalFor(e)}
                     draggable={false}
+                    draggingEmpCode={draggingEmpCode}
+                    setDraggingEmpCode={setDraggingEmpCode}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* 지원 중 — 지원 버튼 누른 인원 (라인에서 빠진 상태, 드래그로 복귀 가능) */}
+          {supportingNow.length > 0 && (
+            <div
+              onDragOver={(e) => e.preventDefault()}
+              onDrop={(ev) => {
+                ev.preventDefault();
+                const raw = ev.dataTransfer.getData("application/json");
+                if (!raw) return;
+                try {
+                  const { empCode, name } = JSON.parse(raw) as {
+                    empCode: string;
+                    name: string;
+                  };
+                  handleDrop("지원", empCode, name);
+                } catch {
+                  // ignore
+                }
+              }}
+              className="rounded-lg border border-blue-200 bg-blue-50/40 p-3"
+            >
+              <h2 className="font-semibold text-slate-900 text-sm mb-2 flex items-center gap-2">
+                <span>지원 중</span>
+                <span className="text-xs font-normal text-blue-700">
+                  ({supportingNow.length}명 — 드래그로 라인 복귀)
+                </span>
+              </h2>
+              <div className="flex flex-wrap gap-2">
+                {supportingNow.map((e) => (
+                  <PresentChip
+                    key={e.empCode}
+                    employee={e}
+                    attendance={attMap.get(e.empCode)}
+                    onClick={() => openModalFor(e)}
+                    draggable
                     draggingEmpCode={draggingEmpCode}
                     setDraggingEmpCode={setDraggingEmpCode}
                   />
