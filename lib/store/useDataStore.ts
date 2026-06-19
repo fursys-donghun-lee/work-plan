@@ -109,6 +109,8 @@ interface DataState {
   manualClockIns: Record<string, string>;
   // 사원코드 → 지원 대상 라인 (override 가 '지원' 일 때 어느 라인 지원하는지)
   supportTargetMap: SupportTargetMap;
+  // 마지막 일일 초기화 날짜 (YYYY-MM-DD) — 자정 넘어가면 reset 실행 트리거
+  lastDailyReset: string;
 
   // Actions
   setSelectedCompany: (company: Company) => void;
@@ -135,6 +137,8 @@ interface DataState {
   logSupport: (empCode: string, name: string, line: string, targetLine: SupportTargetLineName) => void;
   moveWorkerLine: (empCode: string, name: string, fromLine: string, toLine: string) => void;
   returnFromSupport: (empCode: string, name: string, defaultLine: string) => void;
+  // 일일 초기화 — 다음날이 되면 현장 대시보드 상태 모두 리셋
+  resetDailyClockInState: (today: string) => void;
   setWorkDate: (workDate: string) => void;
   setLoadPlan: (data: LoadPlanRow[], meta: UploadMeta) => void;
   setPaintPlan: (data: PaintPlanRow[], meta: UploadMeta) => void;
@@ -251,6 +255,7 @@ export const useDataStore = create<DataState>()(
       currentLineOverrides: {},
       manualClockIns: {},
       supportTargetMap: {},
+      lastDailyReset: "",
 
       setSelectedCompany: (company) => set({ selectedCompany: company }),
       setCompanyChosen: (chosen) => set({ companyChosen: chosen }),
@@ -466,6 +471,20 @@ export const useDataStore = create<DataState>()(
             supportTargetMap: nextSupport,
           };
         }),
+      // 일일 초기화 — 모든 현장 대시보드 상태 리셋 (출근/이동/지원/attendance.isPresent)
+      //   workLog 는 보존 (날짜별 필터되는 히스토리)
+      resetDailyClockInState: (today) =>
+        set((state) => ({
+          lastDailyReset: today,
+          manualClockIns: {},
+          currentLineOverrides: {},
+          supportTargetMap: {},
+          attendance: state.attendance.map((a) => ({
+            ...a,
+            isPresent: false,
+            startTime: null,
+          })),
+        })),
       setWorkDate: (workDate) => set({ workDate }),
       setLoadPlan: (data, meta) => set({ loadPlan: data, loadPlanMeta: meta }),
       setPaintPlan: (data, meta) => set({ paintPlan: data, paintPlanMeta: meta }),

@@ -36,6 +36,7 @@ const DAILY_KEYS = [
   "currentLineOverrides",
   "manualClockIns",
   "supportTargetMap",
+  "lastDailyReset",
 ] as const;
 const PLAN_KEYS = [
   // 대림 포장2라인
@@ -266,6 +267,29 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
   }, []);
 
   // 1) Firestore 실시간 구독
+  // 일일 초기화 — 자정 넘어가면 현장 대시보드 상태 (출근·이동·지원) 리셋
+  //   workLog 는 보존 (히스토리)
+  useEffect(() => {
+    const todayStr = () => {
+      const d = new Date();
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    };
+    const checkAndReset = () => {
+      const today = todayStr();
+      const last = useDataStore.getState().lastDailyReset;
+      if (last !== today) {
+        console.log(
+          `[DailyReset] ${last || "(empty)"} → ${today}, 현장 대시보드 초기화`
+        );
+        useDataStore.getState().resetDailyClockInState(today);
+      }
+    };
+    // 마운트 시 즉시 + 매 분 체크 (앱 켜둔 채 자정 넘어가도 동작)
+    checkAndReset();
+    const id = setInterval(checkAndReset, 60 * 1000);
+    return () => clearInterval(id);
+  }, []);
+
   useEffect(() => {
     if (!isFirebaseConfigured()) {
       console.warn(
@@ -586,12 +610,23 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
 
         // 클릭 출근/이동/지원 등 추가형 필드는 로컬 우선 머지 — 빈 스냅샷이
         // 덮어써서 출근이 풀리는 race condition 방지
+        // 추가로: 로컬이 일일 초기화를 이미 실행했으면 (lastDailyReset 가 더 최신)
+        //   리모트의 어제 데이터 무시 → 로컬 상태 그대로 유지
+        const localResetDate = (local.lastDailyReset || "") as string;
+        const remoteResetDate = (update.lastDailyReset || "") as string;
+        const localResetNewer = localResetDate > remoteResetDate;
+
         const MERGE_MAP_FIELDS = [
           "manualClockIns",
           "currentLineOverrides",
           "supportTargetMap",
         ];
         for (const field of MERGE_MAP_FIELDS) {
+          if (localResetNewer) {
+            // 로컬이 오늘 초기화 됨 — 로컬 상태로 강제 (리모트의 어제 데이터 무시)
+            update[field] = (local[field] ?? {}) as Record<string, unknown>;
+            continue;
+          }
           const localVal = local[field];
           const remoteVal = update[field];
           if (
@@ -603,6 +638,11 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
               ...((localVal ?? {}) as Record<string, unknown>),
             };
           }
+        }
+        // attendance: 로컬 초기화 됐으면 로컬 우선 (isPresent=false 보존)
+        if (localResetNewer && Array.isArray(local.attendance)) {
+          update.attendance = local.attendance;
+          update.lastDailyReset = localResetDate;
         }
         // workLog: id 기반 union (로컬·리모트 모두 보존)
         const localLog = local.workLog as Array<{ id?: string }> | undefined;
