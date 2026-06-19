@@ -6,8 +6,11 @@ import { useHydrated } from "@/components/useComputed";
 import { EmptyState } from "@/components/EmptyState";
 import { ActionModal } from "@/components/ActionModal";
 import { cn } from "@/lib/utils";
-import type { Employee, AttendanceRecord } from "@/lib/types";
+import type { Employee, AttendanceRecord, SupportTargetLineName } from "@/lib/types";
 import { PACKAGE2_FEEDER_WORKERS } from "@/lib/types";
+
+// 이 대시보드가 담당하는 라인 (지원 풀 필터링용)
+const SELF_LINE: SupportTargetLineName = "포장2라인";
 
 const FEEDER_NAME_SET = new Set<string>(PACKAGE2_FEEDER_WORKERS);
 
@@ -84,6 +87,7 @@ export function DaerimClockInView() {
   const packagePosition = useDataStore((s) => s.packagePosition);
   const currentLineOverrides = useDataStore((s) => s.currentLineOverrides);
   const manualClockIns = useDataStore((s) => s.manualClockIns);
+  const supportTargetMap = useDataStore((s) => s.supportTargetMap);
   const clockInEmployee = useDataStore((s) => s.clockInEmployee);
   const clockOutEmployee = useDataStore((s) => s.clockOutEmployee);
   const logSupport = useDataStore((s) => s.logSupport);
@@ -104,6 +108,7 @@ export function DaerimClockInView() {
     presentBySlot,
     presentOthers,
     supportingNow,
+    supportingElsewhere,
     notClockedInGroups,
     notClockedInTotal,
     attMap,
@@ -124,7 +129,8 @@ export function DaerimClockInView() {
 
     const presentBySlot = new Map<string, Employee[]>();
     const presentOthers: Employee[] = [];
-    const supportingNow: Employee[] = [];
+    const supportingNow: Employee[] = []; // 우리 라인(포장2라인) 지원하는 인원
+    const supportingElsewhere: Employee[] = []; // 다른 라인 지원하는 우리 직원
     const sajangNot: Employee[] = [];
     const feederNot: Employee[] = [];
     const workerNot: Employee[] = [];
@@ -158,7 +164,13 @@ export function DaerimClockInView() {
         continue;
       }
       if (cur === "지원") {
-        supportingNow.push(e);
+        // 지원 대상 라인이 SELF_LINE(포장2라인)이면 우리 풀, 아니면 타 라인 지원 중
+        const target = supportTargetMap[e.empCode];
+        if (target === SELF_LINE || !target) {
+          supportingNow.push(e);
+        } else {
+          supportingElsewhere.push(e);
+        }
       } else if (cur === "기타" || !GRID_LINES.has(cur)) {
         presentOthers.push(e);
       } else {
@@ -171,6 +183,7 @@ export function DaerimClockInView() {
     for (const arr of presentBySlot.values()) arr.sort(cmp);
     presentOthers.sort(cmp);
     supportingNow.sort(cmp);
+    supportingElsewhere.sort(cmp);
     sajangNot.sort(cmp);
     feederNot.sort(cmp);
     workerNot.sort(cmp);
@@ -184,6 +197,7 @@ export function DaerimClockInView() {
       presentBySlot,
       presentOthers,
       supportingNow,
+      supportingElsewhere,
       notClockedInGroups: { 소사장: sajangNot, 피더: feederNot, 작업자: workerNot },
       notClockedInTotal,
       attMap: m,
@@ -191,7 +205,7 @@ export function DaerimClockInView() {
       currentSlotMap,
       stats: { total, present, absent: notClockedInTotal },
     };
-  }, [employees, attendance, packagePosition, currentLineOverrides, manualClockIns]);
+  }, [employees, attendance, packagePosition, currentLineOverrides, manualClockIns, supportTargetMap]);
 
   if (!hydrated) return null;
 
@@ -232,8 +246,8 @@ export function DaerimClockInView() {
     closeModal();
   };
 
-  const handleSupport = () => {
-    logSupport(modal.empCode, modal.name, modal.currentLine);
+  const handleSupport = (targetLine: SupportTargetLineName) => {
+    logSupport(modal.empCode, modal.name, modal.currentLine, targetLine);
     closeModal();
   };
 
@@ -353,12 +367,18 @@ export function DaerimClockInView() {
 
         {/* 오른쪽 패널 — 출근 전 4개 그룹 (소사장/피더/작업자/지원)
               지원 그룹은 출근한 인원 중 지원 상태인 사람들 (드래그로 라인 배치) */}
-        {(notClockedInTotal > 0 || supportingNow.length > 0) && (
+        {(notClockedInTotal > 0 ||
+          supportingNow.length > 0 ||
+          supportingElsewhere.length > 0) && (
           <div className="w-56 flex-shrink-0 card border-amber-200 bg-amber-50/40 self-stretch">
             <h2 className="font-semibold text-slate-900 mb-3 text-sm">
               대기 인원{" "}
               <span className="text-xs font-normal text-amber-700">
-                (출근 전 {notClockedInTotal} · 지원 {supportingNow.length})
+                (출근 전 {notClockedInTotal} · 지원 {supportingNow.length}
+                {supportingElsewhere.length > 0
+                  ? ` · 타지원 ${supportingElsewhere.length}`
+                  : ""}
+                )
               </span>
             </h2>
             <div className="space-y-3">
@@ -375,10 +395,41 @@ export function DaerimClockInView() {
                 workers={supportingNow}
                 manualClockIns={manualClockIns}
                 onClickName={openModalFor}
-                onDropFromLine={(empCode, name) => handleDrop("지원", empCode, name)}
+                onDropFromLine={(empCode, name) => {
+                  // 라인 → 지원 풀로 드롭: SELF_LINE(포장2라인) 지원으로 처리
+                  logSupport(empCode, name, currentSlotMap.get(empCode) || "", SELF_LINE);
+                }}
                 draggingEmpCode={draggingEmpCode}
                 setDraggingEmpCode={setDraggingEmpCode}
               />
+
+              {/* 타 라인 지원 중인 우리 직원 — 읽기 전용 (해당 회사 대시보드에서 관리) */}
+              {supportingElsewhere.length > 0 && (
+                <div>
+                  <div className="font-bold text-slate-800 text-xs mb-1.5 border-b border-purple-300 pb-1 flex items-center justify-between">
+                    <span>타 라인 지원 중</span>
+                    <span className="text-[10px] font-normal text-slate-500">
+                      {supportingElsewhere.length}명
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-2 gap-1">
+                    {supportingElsewhere.map((e) => {
+                      const target = supportTargetMap[e.empCode];
+                      return (
+                        <button
+                          key={e.empCode}
+                          type="button"
+                          onClick={() => openModalFor(e)}
+                          className="px-1.5 py-1 rounded text-xs font-semibold border bg-purple-100 border-purple-300 text-purple-800 hover:bg-purple-200 transition-colors text-center truncate"
+                          title={`${e.name} · 지원 → ${target}`}
+                        >
+                          {e.name}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         )}

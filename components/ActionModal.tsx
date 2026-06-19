@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
+import { SUPPORT_TARGET_LINES, type SupportTargetLineName } from "@/lib/types";
 
 interface Props {
   open: boolean;
@@ -12,10 +13,11 @@ interface Props {
   onClose: () => void;
   onClockIn: () => void;
   onClockOut: () => void;
-  onSupport: () => void;
+  onSupport: (targetLine: SupportTargetLineName) => void;
 }
 
 // 직원 이름 클릭 시 표시되는 액션 선택 모달 — 출근/퇴근/지원
+// 지원 클릭 시 → 지원 라인 선택 단계로 전환
 export function ActionModal({
   open,
   workerName,
@@ -27,7 +29,13 @@ export function ActionModal({
   onClockOut,
   onSupport,
 }: Props) {
-  // ESC 키로 닫기
+  const [stage, setStage] = useState<"main" | "supportSelect">("main");
+
+  // 모달 열릴 때 main 단계로 리셋
+  useEffect(() => {
+    if (open) setStage("main");
+  }, [open]);
+
   useEffect(() => {
     if (!open) return;
     const handler = (e: KeyboardEvent) => {
@@ -45,7 +53,7 @@ export function ActionModal({
       onClick={onClose}
     >
       <div
-        className="bg-white rounded-xl p-6 shadow-xl min-w-[320px] max-w-[400px]"
+        className="bg-white rounded-xl p-6 shadow-xl min-w-[340px] max-w-[440px]"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-4">
@@ -69,34 +77,60 @@ export function ActionModal({
           </div>
         </div>
 
-        <div className="grid grid-cols-3 gap-2 mb-3">
-          <ActionButton
-            label="출근"
-            tone="emerald"
-            disabled={isPresent}
-            onClick={onClockIn}
-          />
-          <ActionButton
-            label="퇴근"
-            tone="rose"
-            disabled={!isPresent}
-            onClick={onClockOut}
-          />
-          <ActionButton
-            label="지원"
-            tone="blue"
-            disabled={!isPresent}
-            onClick={onSupport}
-          />
-        </div>
-
-        <button
-          type="button"
-          onClick={onClose}
-          className="w-full text-sm text-slate-500 hover:text-slate-700 py-1.5"
-        >
-          취소
-        </button>
+        {stage === "main" ? (
+          <>
+            <div className="grid grid-cols-3 gap-2 mb-3">
+              <ActionButton
+                label="출근"
+                tone="emerald"
+                disabled={isPresent}
+                onClick={onClockIn}
+              />
+              <ActionButton
+                label="퇴근"
+                tone="rose"
+                disabled={!isPresent}
+                onClick={onClockOut}
+              />
+              <ActionButton
+                label="지원"
+                tone="blue"
+                disabled={!isPresent}
+                onClick={() => setStage("supportSelect")}
+              />
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="w-full text-sm text-slate-500 hover:text-slate-700 py-1.5"
+            >
+              취소
+            </button>
+          </>
+        ) : (
+          <>
+            <div className="text-sm font-semibold text-slate-700 mb-2">
+              어느 라인을 지원할까요?
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-3">
+              {SUPPORT_TARGET_LINES.map((line) => (
+                <ActionButton
+                  key={line}
+                  label={line}
+                  tone="blue"
+                  onClick={() => onSupport(line)}
+                />
+              ))}
+            </div>
+            <button
+              type="button"
+              onClick={() => setStage("main")}
+              className="w-full text-sm text-slate-500 hover:text-slate-700 py-1.5"
+            >
+              ← 뒤로
+            </button>
+          </>
+        )}
       </div>
     </div>
   );

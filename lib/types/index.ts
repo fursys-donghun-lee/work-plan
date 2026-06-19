@@ -370,6 +370,19 @@ export interface WorkLogEntry {
 // 사원코드 → 현재 라인 위치 (출근 후 드래그앤드롭/지원으로 변경 가능)
 export type CurrentLineOverrides = Record<string, string>;
 
+// 지원 대상 라인 (현장 대시보드 지원 풀 라우팅용)
+export const SUPPORT_TARGET_LINES = [
+  "도장1라인",
+  "도장2라인",
+  "포장1라인",
+  "포장2라인",
+  "가공라인",
+] as const;
+export type SupportTargetLineName = (typeof SUPPORT_TARGET_LINES)[number];
+
+// 사원코드 → 지원 대상 라인 (override === '지원' 일 때만 의미 있음)
+export type SupportTargetMap = Record<string, SupportTargetLineName>;
+
 // === 도장계획 (다호산업 일일자료) ===
 export interface PaintPlanRow {
   no: string;            // A: 번호

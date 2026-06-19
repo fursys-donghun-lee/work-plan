@@ -23,6 +23,8 @@ import type {
   WorkGroup,
   WorkLogEntry,
   CurrentLineOverrides,
+  SupportTargetMap,
+  SupportTargetLineName,
 } from "@/lib/types";
 import { DEFAULT_WORK_GROUPS } from "@/lib/calc/defaultGroups";
 
@@ -105,6 +107,8 @@ interface DataState {
   // 현장 대시보드 수동 출근 — 사원코드 → 출근 ISO timestamp
   //   일일자료 근태와 별개로, 이름 클릭한 인원만 기록
   manualClockIns: Record<string, string>;
+  // 사원코드 → 지원 대상 라인 (override 가 '지원' 일 때 어느 라인 지원하는지)
+  supportTargetMap: SupportTargetMap;
 
   // Actions
   setSelectedCompany: (company: Company) => void;
@@ -128,7 +132,7 @@ interface DataState {
   setAttendance: (data: AttendanceRecord[], workDate: string, meta: UploadMeta) => void;
   clockInEmployee: (empCode: string, name: string, line?: string) => void;
   clockOutEmployee: (empCode: string, name: string, line?: string) => void;
-  logSupport: (empCode: string, name: string, line: string) => void;
+  logSupport: (empCode: string, name: string, line: string, targetLine: SupportTargetLineName) => void;
   moveWorkerLine: (empCode: string, name: string, fromLine: string, toLine: string) => void;
   setWorkDate: (workDate: string) => void;
   setLoadPlan: (data: LoadPlanRow[], meta: UploadMeta) => void;
@@ -245,6 +249,7 @@ export const useDataStore = create<DataState>()(
       workLog: [],
       currentLineOverrides: {},
       manualClockIns: {},
+      supportTargetMap: {},
 
       setSelectedCompany: (company) => set({ selectedCompany: company }),
       setCompanyChosen: (chosen) => set({ companyChosen: chosen }),
@@ -339,14 +344,17 @@ export const useDataStore = create<DataState>()(
           delete nextClockIns[empCode];
           const nextOverrides = { ...state.currentLineOverrides };
           delete nextOverrides[empCode];
+          const nextSupport = { ...state.supportTargetMap };
+          delete nextSupport[empCode];
           return {
             workLog: [...state.workLog, logEntry],
             manualClockIns: nextClockIns,
             currentLineOverrides: nextOverrides,
+            supportTargetMap: nextSupport,
           };
         }),
-      // 지원 — workLog 에 '지원' 액션 기록 + 라인에서 빠짐 (currentLineOverrides 에 '지원' 마킹)
-      logSupport: (empCode, name, line) =>
+      // 지원 — workLog 기록 + 라인에서 빠짐(override='지원') + supportTargetMap 에 대상 라인 기록
+      logSupport: (empCode, name, line, targetLine) =>
         set((state) => {
           const now = new Date();
           const logEntry: WorkLogEntry = {
@@ -357,12 +365,17 @@ export const useDataStore = create<DataState>()(
             timestamp: now.toISOString(),
             action: "지원",
             line: line || "",
+            toLine: targetLine,
           };
           return {
             workLog: [...state.workLog, logEntry],
             currentLineOverrides: {
               ...state.currentLineOverrides,
               [empCode]: "지원",
+            },
+            supportTargetMap: {
+              ...state.supportTargetMap,
+              [empCode]: targetLine,
             },
           };
         }),
@@ -381,12 +394,16 @@ export const useDataStore = create<DataState>()(
             fromLine,
             toLine,
           };
+          // 라인으로 복귀(toLine !== '지원') 시 supportTargetMap 제거
+          const nextSupport = { ...state.supportTargetMap };
+          if (toLine !== "지원") delete nextSupport[empCode];
           return {
             workLog: [...state.workLog, logEntry],
             currentLineOverrides: {
               ...state.currentLineOverrides,
               [empCode]: toLine,
             },
+            supportTargetMap: nextSupport,
           };
         }),
       setWorkDate: (workDate) => set({ workDate }),
