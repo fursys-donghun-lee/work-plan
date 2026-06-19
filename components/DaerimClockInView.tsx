@@ -349,55 +349,16 @@ export function DaerimClockInView() {
             </div>
           )}
 
-          {/* 지원 중 — 지원 버튼 누른 인원 (라인에서 빠진 상태, 드래그로 복귀 가능) */}
-          {supportingNow.length > 0 && (
-            <div
-              onDragOver={(e) => e.preventDefault()}
-              onDrop={(ev) => {
-                ev.preventDefault();
-                const raw = ev.dataTransfer.getData("application/json");
-                if (!raw) return;
-                try {
-                  const { empCode, name } = JSON.parse(raw) as {
-                    empCode: string;
-                    name: string;
-                  };
-                  handleDrop("지원", empCode, name);
-                } catch {
-                  // ignore
-                }
-              }}
-              className="rounded-lg border border-blue-200 bg-blue-50/40 p-3"
-            >
-              <h2 className="font-semibold text-slate-900 text-sm mb-2 flex items-center gap-2">
-                <span>지원 중</span>
-                <span className="text-xs font-normal text-blue-700">
-                  ({supportingNow.length}명 — 드래그로 라인 복귀)
-                </span>
-              </h2>
-              <div className="flex flex-wrap gap-2">
-                {supportingNow.map((e) => (
-                  <PresentChip
-                    key={e.empCode}
-                    employee={e}
-                    clockInTime={manualClockIns[e.empCode]}
-                    onClick={() => openModalFor(e)}
-                    draggable
-                    draggingEmpCode={draggingEmpCode}
-                    setDraggingEmpCode={setDraggingEmpCode}
-                  />
-                ))}
-              </div>
-            </div>
-          )}
         </div>
 
-        {notClockedInTotal > 0 && (
+        {/* 오른쪽 패널 — 출근 전 4개 그룹 (소사장/피더/작업자/지원)
+              지원 그룹은 출근한 인원 중 지원 상태인 사람들 (드래그로 라인 배치) */}
+        {(notClockedInTotal > 0 || supportingNow.length > 0) && (
           <div className="w-56 flex-shrink-0 card border-amber-200 bg-amber-50/40 self-stretch">
             <h2 className="font-semibold text-slate-900 mb-3 text-sm">
-              출근 전{" "}
+              대기 인원{" "}
               <span className="text-xs font-normal text-amber-700">
-                ({notClockedInTotal}명)
+                (출근 전 {notClockedInTotal} · 지원 {supportingNow.length})
               </span>
             </h2>
             <div className="space-y-3">
@@ -409,6 +370,15 @@ export function DaerimClockInView() {
                   onClickName={openModalFor}
                 />
               ))}
+              {/* 지원 — 출근한 인원 중 지원 상태. 드래그 가능 + 드롭존 */}
+              <SupportPoolGroup
+                workers={supportingNow}
+                manualClockIns={manualClockIns}
+                onClickName={openModalFor}
+                onDropFromLine={(empCode, name) => handleDrop("지원", empCode, name)}
+                draggingEmpCode={draggingEmpCode}
+                setDraggingEmpCode={setDraggingEmpCode}
+              />
             </div>
           </div>
         )}
@@ -463,6 +433,102 @@ function NotClockedInGroup({
               {e.name}
             </button>
           ))
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SupportPoolGroup({
+  workers,
+  manualClockIns,
+  onClickName,
+  onDropFromLine,
+  draggingEmpCode,
+  setDraggingEmpCode,
+}: {
+  workers: Employee[];
+  manualClockIns: Record<string, string>;
+  onClickName: (e: Employee) => void;
+  onDropFromLine: (empCode: string, name: string) => void;
+  draggingEmpCode: string | null;
+  setDraggingEmpCode: (s: string | null) => void;
+}) {
+  const [hover, setHover] = useState(false);
+  const onDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    setHover(true);
+  };
+  const onDragLeave = () => setHover(false);
+  const onDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    setHover(false);
+    const raw = e.dataTransfer.getData("application/json");
+    if (!raw) return;
+    try {
+      const { empCode, name } = JSON.parse(raw) as {
+        empCode: string;
+        name: string;
+      };
+      onDropFromLine(empCode, name);
+    } catch {
+      // ignore
+    }
+  };
+
+  return (
+    <div
+      onDragOver={onDragOver}
+      onDragLeave={onDragLeave}
+      onDrop={onDrop}
+      className={cn(
+        "rounded transition-colors p-1.5 -m-1.5",
+        hover && "bg-blue-100 ring-2 ring-blue-300"
+      )}
+    >
+      <div className="font-bold text-slate-800 text-xs mb-1.5 border-b border-blue-300 pb-1 flex items-center justify-between">
+        <span>지원</span>
+        <span className="text-[10px] font-normal text-slate-500">
+          {workers.length}명
+        </span>
+      </div>
+      <div className="grid grid-cols-2 gap-1">
+        {workers.length === 0 ? (
+          <span className="col-span-2 text-[11px] text-slate-400 italic px-1">
+            {hover ? "여기로 놓으면 지원 처리" : "없음"}
+          </span>
+        ) : (
+          workers.map((e) => {
+            const isDragging = draggingEmpCode === e.empCode;
+            const handleDragStart = (ev: React.DragEvent) => {
+              ev.dataTransfer.setData(
+                "application/json",
+                JSON.stringify({ empCode: e.empCode, name: e.name })
+              );
+              ev.dataTransfer.effectAllowed = "move";
+              setDraggingEmpCode(e.empCode);
+            };
+            const handleDragEnd = () => setDraggingEmpCode(null);
+            const hhmm = formatTime(manualClockIns[e.empCode]);
+            return (
+              <button
+                key={e.empCode}
+                type="button"
+                draggable
+                onDragStart={handleDragStart}
+                onDragEnd={handleDragEnd}
+                onClick={() => onClickName(e)}
+                className={cn(
+                  "px-1.5 py-1 rounded text-xs font-semibold border bg-blue-100 border-blue-300 text-blue-800 hover:bg-blue-200 transition-colors text-center truncate cursor-grab active:cursor-grabbing",
+                  isDragging && "opacity-50"
+                )}
+                title={`${e.name} · 지원 ${hhmm} · 드래그로 라인 배치`}
+              >
+                {e.name}
+              </button>
+            );
+          })
         )}
       </div>
     </div>
