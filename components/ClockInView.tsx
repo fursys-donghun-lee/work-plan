@@ -37,18 +37,13 @@ export interface ClockInConfig {
   // 자동 재배치 가이드 — 제공되면 '재배치' 버튼 노출
   //   클릭 시 이동 권장 목록을 가이드로 표시 (자동 적용 X — 사용자가 직접 드래그)
   computeAutoPlaceGuide?: () => GuideMove[];
-  // 알고리즘이 계획한 잔업 인원 (현재 출근 인원 기준)
-  plannedOvertimePeople?: number;
 }
-
-export type GuideReason = "urgent" | "overtime" | "load";
 
 export interface GuideMove {
   empCode: string;
   name: string;
   fromLine: string;
   toLine: string;
-  reason: GuideReason;
 }
 
 export interface ClockInViewProps {
@@ -458,65 +453,6 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
               {stats.absent}명
             </div>
           </div>
-          {/* 최종 가용 = 우리 회사 출근 - 타라인 지원 보낸 + 받은 지원 */}
-          <div
-            className="px-3 py-1.5 rounded-lg border bg-indigo-50 border-indigo-200"
-            title="우리 회사 출근 인원에서 타 라인 지원 보낸 인원을 빼고, 받은 지원 인원을 더한 값"
-          >
-            <div className="text-[11px] text-indigo-600">최종 가용</div>
-            <div className="text-lg font-bold text-indigo-700">
-              {stats.present -
-                supportingElsewhere.length +
-                receivedFromOthers.length}
-              명
-              {(supportingElsewhere.length > 0 ||
-                receivedFromOthers.length > 0) && (
-                <span className="ml-1 text-[10px] font-normal text-indigo-500">
-                  ({supportingElsewhere.length > 0 &&
-                    `-${supportingElsewhere.length}`}
-                  {supportingElsewhere.length > 0 &&
-                    receivedFromOthers.length > 0 &&
-                    " "}
-                  {receivedFromOthers.length > 0 &&
-                    `+${receivedFromOthers.length}`}
-                  )
-                </span>
-              )}
-            </div>
-          </div>
-          {/* 잔업 예정 — 알고리즘이 계획한 잔업 인원 (config 가 제공한 경우만) */}
-          {typeof config.plannedOvertimePeople === "number" && (
-            <div
-              className={cn(
-                "px-3 py-1.5 rounded-lg border",
-                config.plannedOvertimePeople > 0
-                  ? "bg-amber-50 border-amber-200"
-                  : "bg-slate-50 border-slate-200"
-              )}
-              title="현재 출근 인원 기준 알고리즘이 계획한 잔업 인원"
-            >
-              <div
-                className={cn(
-                  "text-[11px]",
-                  config.plannedOvertimePeople > 0
-                    ? "text-amber-700"
-                    : "text-slate-500"
-                )}
-              >
-                잔업 예정
-              </div>
-              <div
-                className={cn(
-                  "text-lg font-bold",
-                  config.plannedOvertimePeople > 0
-                    ? "text-amber-700"
-                    : "text-slate-800"
-                )}
-              >
-                {config.plannedOvertimePeople}명
-              </div>
-            </div>
-          )}
         </div>
       </div>
 
@@ -743,21 +679,6 @@ function GuideCard({
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
           {sortedMoves.map((m) => {
             const applied = appliedEmpCodes.has(m.empCode);
-            const reasonLabel: Record<GuideReason, { text: string; cls: string }> = {
-              urgent: {
-                text: "🔥 긴급",
-                cls: "bg-rose-100 text-rose-800 border-rose-300",
-              },
-              overtime: {
-                text: "📈 잔업",
-                cls: "bg-amber-100 text-amber-800 border-amber-300",
-              },
-              load: {
-                text: "⚖ 부하",
-                cls: "bg-slate-100 text-slate-700 border-slate-300",
-              },
-            };
-            const reasonInfo = reasonLabel[m.reason];
             return (
               <div
                 key={m.empCode}
@@ -796,22 +717,6 @@ function GuideCard({
                   )}
                 >
                   {displayLineName(m.toLine)}
-                </span>
-                <span
-                  className={cn(
-                    "text-[10px] font-semibold px-1.5 py-0.5 rounded border whitespace-nowrap",
-                    reasonInfo.cls,
-                    applied && "opacity-60"
-                  )}
-                  title={
-                    m.reason === "urgent"
-                      ? "긴급건 있는 라인 우선 배치"
-                      : m.reason === "overtime"
-                        ? "잔업 시간대 라인 충원"
-                        : "라인 부하 분산"
-                  }
-                >
-                  {reasonInfo.text}
                 </span>
                 {applied ? (
                   <span className="ml-auto text-xs font-semibold text-emerald-700">
