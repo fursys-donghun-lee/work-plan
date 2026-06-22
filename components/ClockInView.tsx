@@ -93,6 +93,10 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
   const [draggingEmpCode, setDraggingEmpCode] = useState<string | null>(null);
   // 재배치 가이드 — null=닫힘, 배열=표시
   const [guideMoves, setGuideMoves] = useState<GuideMove[] | null>(null);
+  // 가이드 중 적용 완료된 항목 (empCode 기준)
+  const [appliedEmpCodes, setAppliedEmpCodes] = useState<Set<string>>(
+    () => new Set()
+  );
 
   const {
     presentBySlot,
@@ -311,6 +315,17 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
     if (!config.computeAutoPlaceGuide) return;
     const moves = config.computeAutoPlaceGuide();
     setGuideMoves(moves);
+    setAppliedEmpCodes(new Set()); // 새 가이드 생성 시 적용 기록 초기화
+  };
+  // 가이드 한 건 적용 — 현재 라인 → 권장 라인
+  const handleApplyGuide = (move: GuideMove) => {
+    const currentFrom = currentLineOverrides[move.empCode] || move.fromLine;
+    moveWorkerLine(move.empCode, move.name, currentFrom, move.toLine);
+    setAppliedEmpCodes((prev) => {
+      const next = new Set(prev);
+      next.add(move.empCode);
+      return next;
+    });
   };
 
   // 일괄 출근 — 출근 전 인원 모두 출근 처리
@@ -441,11 +456,24 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
         </div>
       </div>
 
-      {/* 재배치 가이드 — 자동 적용 X, 권장 이동 목록만 표시 */}
+      {/* 재배치 가이드 — 권장 이동 목록 (가이드별 적용 버튼) */}
       {guideMoves !== null && (
         <GuideCard
           moves={guideMoves}
+          appliedEmpCodes={appliedEmpCodes}
           displayLineName={displayName}
+          onApply={handleApplyGuide}
+          onApplyAll={() => {
+            for (const m of guideMoves) {
+              if (appliedEmpCodes.has(m.empCode)) continue;
+              const currentFrom =
+                currentLineOverrides[m.empCode] || m.fromLine;
+              moveWorkerLine(m.empCode, m.name, currentFrom, m.toLine);
+            }
+            setAppliedEmpCodes(
+              new Set(guideMoves.map((m) => m.empCode))
+            );
+          }}
           onClose={() => setGuideMoves(null)}
         />
       )}
@@ -590,38 +618,58 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
 
 function GuideCard({
   moves,
+  appliedEmpCodes,
   displayLineName,
+  onApply,
+  onApplyAll,
   onClose,
 }: {
   moves: GuideMove[];
+  appliedEmpCodes: Set<string>;
   displayLineName: (line: string) => string;
+  onApply: (move: GuideMove) => void;
+  onApplyAll: () => void;
   onClose: () => void;
 }) {
   const now = new Date();
   const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  // 이름 가나다순 정렬
   const sortedMoves = [...moves].sort((a, b) =>
     a.name.localeCompare(b.name, "ko")
   );
+  const pendingCount = sortedMoves.filter(
+    (m) => !appliedEmpCodes.has(m.empCode)
+  ).length;
 
   return (
     <div className="card border-indigo-300 bg-indigo-50/60">
-      <div className="flex items-center justify-between mb-3">
+      <div className="flex items-center justify-between mb-3 flex-wrap gap-2">
         <h2 className="font-bold text-slate-900 text-base flex items-center gap-2">
           <span>✨</span>
           <span>재배치 가이드</span>
           <span className="text-xs font-normal text-slate-500">
-            {timeStr} 기준 · {moves.length}명 · 칩을 드래그해서 직접 이동시켜
-            주세요
+            {timeStr} 기준 · {moves.length}건 (적용 {moves.length - pendingCount} /
+            대기 {pendingCount})
           </span>
         </h2>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-sm text-slate-500 hover:text-slate-700 px-3 py-1 rounded hover:bg-white"
-        >
-          닫기 ✕
-        </button>
+        <div className="flex gap-2">
+          {pendingCount > 0 && (
+            <button
+              type="button"
+              onClick={onApplyAll}
+              className="text-xs px-3 py-1 rounded font-bold bg-indigo-600 hover:bg-indigo-700 text-white"
+              title="대기 중인 모든 가이드 일괄 적용"
+            >
+              전체 적용 ({pendingCount})
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={onClose}
+            className="text-sm text-slate-500 hover:text-slate-700 px-3 py-1 rounded hover:bg-white"
+          >
+            닫기 ✕
+          </button>
+        </div>
       </div>
       {sortedMoves.length === 0 ? (
         <div className="text-sm text-slate-500 italic">
@@ -629,23 +677,63 @@ function GuideCard({
         </div>
       ) : (
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
-          {sortedMoves.map((m) => (
-            <div
-              key={m.empCode}
-              className="flex items-center gap-2 text-sm rounded-md border border-indigo-200 bg-white px-3 py-1.5"
-            >
-              <span className="font-bold text-slate-900 w-16 truncate">
-                {m.name}
-              </span>
-              <span className="font-mono text-xs text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
-                {displayLineName(m.fromLine)}
-              </span>
-              <span className="text-indigo-500 font-bold">→</span>
-              <span className="font-mono text-xs text-white bg-indigo-600 px-1.5 py-0.5 rounded">
-                {displayLineName(m.toLine)}
-              </span>
-            </div>
-          ))}
+          {sortedMoves.map((m) => {
+            const applied = appliedEmpCodes.has(m.empCode);
+            return (
+              <div
+                key={m.empCode}
+                className={cn(
+                  "flex items-center gap-2 text-sm rounded-md border px-3 py-1.5",
+                  applied
+                    ? "border-emerald-200 bg-emerald-50/60 opacity-70"
+                    : "border-indigo-200 bg-white"
+                )}
+              >
+                <span
+                  className={cn(
+                    "font-bold w-16 truncate",
+                    applied ? "text-slate-500 line-through" : "text-slate-900"
+                  )}
+                >
+                  {m.name}
+                </span>
+                <span className="font-mono text-xs text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                  {displayLineName(m.fromLine)}
+                </span>
+                <span
+                  className={cn(
+                    "font-bold",
+                    applied ? "text-emerald-500" : "text-indigo-500"
+                  )}
+                >
+                  →
+                </span>
+                <span
+                  className={cn(
+                    "font-mono text-xs px-1.5 py-0.5 rounded",
+                    applied
+                      ? "text-emerald-700 bg-emerald-100"
+                      : "text-white bg-indigo-600"
+                  )}
+                >
+                  {displayLineName(m.toLine)}
+                </span>
+                {applied ? (
+                  <span className="ml-auto text-xs font-semibold text-emerald-700">
+                    ✓ 적용됨
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => onApply(m)}
+                    className="ml-auto text-xs px-2 py-0.5 rounded font-semibold bg-indigo-600 hover:bg-indigo-700 text-white"
+                  >
+                    적용
+                  </button>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>
