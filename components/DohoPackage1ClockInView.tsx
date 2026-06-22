@@ -1,6 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
 import { ClockInView, type ClockInConfig } from "@/components/ClockInView";
+import { useDataStore } from "@/lib/store/useDataStore";
+import { computeUrgentByGroup, getUrgentFor } from "@/lib/calc/urgentLoad";
 import type { Employee } from "@/lib/types";
 
 // 슬롯 키 (사용자 지정 그리드) — 5행 배치 (마지막 행에 물류)
@@ -25,6 +28,11 @@ const POSITION_TO_SLOT: Record<string, string> = {
   "포장1(마감1)": "마감1",
   "포장1(마감2)": "마감2",
 };
+
+// 역매핑 — 슬롯 키 → urgentProduction.packageLine 형식 (포장1(...))
+const SLOT_TO_URGENT_KEY: Record<string, string> = Object.fromEntries(
+  Object.entries(POSITION_TO_SLOT).map(([pos, slot]) => [slot, pos])
+);
 
 function slotFor(e: Employee, packagePos: Map<string, string>): string {
   // 물류 카테고리는 항상 물류 슬롯
@@ -59,5 +67,18 @@ const config: ClockInConfig = {
 };
 
 export function DohoPackage1ClockInView() {
-  return <ClockInView config={config} />;
+  const urgentProduction = useDataStore((s) => s.urgentProduction);
+  const workDate = useDataStore((s) => s.workDate);
+  const urgentSlots = useMemo(() => {
+    const m = computeUrgentByGroup(urgentProduction, workDate);
+    const set = new Set<string>();
+    for (const slot of LINE_GRID.flat()) {
+      const urgentKey = SLOT_TO_URGENT_KEY[slot];
+      if (!urgentKey) continue;
+      const u = getUrgentFor(m, urgentKey);
+      if (u.dMinus1 > 0 || u.dMinus2 > 0) set.add(slot);
+    }
+    return set;
+  }, [urgentProduction, workDate]);
+  return <ClockInView config={config} urgentSlots={urgentSlots} />;
 }

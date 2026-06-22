@@ -36,6 +36,12 @@ export interface ClockInConfig {
   categoryFilter?: (e: Employee) => boolean;
 }
 
+export interface ClockInViewProps {
+  config: ClockInConfig;
+  // 긴급건이 있는 슬롯 (라인) — 라인 카드를 붉은색 배경으로 강조
+  urgentSlots?: Set<string>;
+}
+
 interface ModalState {
   open: boolean;
   empCode: string;
@@ -45,7 +51,7 @@ interface ModalState {
   isSupporting: boolean;
 }
 
-export function ClockInView({ config }: { config: ClockInConfig }) {
+export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
   const hydrated = useHydrated();
   const employees = useDataStore((s) => s.employees);
   const workDate = useDataStore((s) => s.workDate);
@@ -394,6 +400,7 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
                   workers={presentBySlot.get(line) ?? []}
                   manualClockIns={manualClockIns}
                   receivedEmpCodeSet={receivedEmpCodeSet}
+                  isUrgent={!!urgentSlots?.has(line)}
                   onChipClick={openModalFor}
                   onDropWorker={(empCode, name) => handleDrop(line, empCode, name)}
                   draggingEmpCode={draggingEmpCode}
@@ -662,6 +669,7 @@ function LineCard({
   workers,
   manualClockIns,
   receivedEmpCodeSet,
+  isUrgent,
   onChipClick,
   onDropWorker,
   draggingEmpCode,
@@ -672,6 +680,7 @@ function LineCard({
   workers: Employee[];
   manualClockIns: Record<string, string>;
   receivedEmpCodeSet: Set<string>;
+  isUrgent: boolean;
   onChipClick: (e: Employee) => void;
   onDropWorker: (empCode: string, name: string) => void;
   draggingEmpCode: string | null;
@@ -704,14 +713,24 @@ function LineCard({
       onDragLeave={onDragLeave}
       onDrop={onDrop}
       className={cn(
-        "rounded-lg border bg-white p-3 min-h-[120px] transition-colors",
+        "rounded-lg border p-3 min-h-[120px] transition-colors",
         hover
           ? "border-blue-400 bg-blue-50/40 ring-2 ring-blue-200"
-          : "border-slate-200"
+          : isUrgent
+            ? "border-rose-400 bg-rose-50"
+            : "border-slate-200 bg-white"
       )}
     >
       <div className="flex items-center justify-between mb-2">
-        <div className="font-bold text-slate-800 text-sm">{displayName}</div>
+        <div
+          className={cn(
+            "font-bold text-sm flex items-center gap-1",
+            isUrgent ? "text-rose-800" : "text-slate-800"
+          )}
+        >
+          {isUrgent && <span title="긴급건">🔥</span>}
+          {displayName}
+        </div>
         <div
           className={cn(
             "text-xs font-semibold",

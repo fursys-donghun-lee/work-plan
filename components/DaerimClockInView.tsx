@@ -1,6 +1,9 @@
 "use client";
 
+import { useMemo } from "react";
 import { ClockInView, type ClockInConfig } from "@/components/ClockInView";
+import { useDataStore } from "@/lib/store/useDataStore";
+import { computeUrgentByGroup, getUrgentFor } from "@/lib/calc/urgentLoad";
 import type { Employee } from "@/lib/types";
 import { PACKAGE2_FEEDER_WORKERS } from "@/lib/types";
 
@@ -66,5 +69,16 @@ const config: ClockInConfig = {
 };
 
 export function DaerimClockInView() {
-  return <ClockInView config={config} />;
+  const urgentProduction = useDataStore((s) => s.urgentProduction);
+  const workDate = useDataStore((s) => s.workDate);
+  const urgentSlots = useMemo(() => {
+    const m = computeUrgentByGroup(urgentProduction, workDate);
+    const set = new Set<string>();
+    for (const slot of LINE_GRID.flat()) {
+      const u = getUrgentFor(m, slot);
+      if (u.dMinus1 > 0 || u.dMinus2 > 0) set.add(slot);
+    }
+    return set;
+  }, [urgentProduction, workDate]);
+  return <ClockInView config={config} urgentSlots={urgentSlots} />;
 }
