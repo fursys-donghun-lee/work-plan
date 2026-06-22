@@ -4,7 +4,7 @@ import { useMemo, useCallback } from "react";
 import { ClockInView, type ClockInConfig } from "@/components/ClockInView";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useDohoPackage1Realloc } from "@/components/useDohoPackage1Realloc";
-import { computeReallocation } from "@/lib/calc/reallocation";
+import { computeReallocation, wallToWorkTime } from "@/lib/calc/reallocation";
 import { computeUrgentByGroup, getUrgentFor } from "@/lib/calc/urgentLoad";
 import type { Employee } from "@/lib/types";
 
@@ -66,16 +66,21 @@ export function DohoPackage1ClockInView() {
   const bulkMoveWorkers = useDataStore((s) => s.bulkMoveWorkers);
   const { groups, extraFree, lineWorkers } = useDohoPackage1Realloc();
 
-  // 재배치 계획의 자동 배치 로직
+  // 재배치 계획의 자동 배치 로직 — 현재 시각까지 진행된 이동만 적용
   const handleAutoPlace = useCallback(() => {
     const result = computeReallocation(groups, 0, 8, extraFree, false, true);
+    const now = new Date();
+    const wall = now.getHours() + now.getMinutes() / 60;
+    const currentWt = wallToWorkTime(wall);
     const byLine: Record<string, string[]> = {};
     const finalLineByName: Record<string, string> = {};
     for (const [line, workers] of Object.entries(lineWorkers)) {
       byLine[line] = [...workers];
       for (const w of workers) finalLineByName[w] = line;
     }
-    const sortedMoves = [...result.moves].sort((a, b) => a.time - b.time);
+    const sortedMoves = [...result.moves]
+      .filter((m) => m.time <= currentWt + 1e-6)
+      .sort((a, b) => a.time - b.time);
     for (const m of sortedMoves) {
       for (let i = 0; i < m.count; i++) {
         const fromList = byLine[m.from] ?? [];

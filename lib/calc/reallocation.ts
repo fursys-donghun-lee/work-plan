@@ -703,6 +703,23 @@ export function workTimeToWall(wt: number): number {
   return last.wallStart + (last.wtEnd - last.wtStart) + (wt - last.wtEnd);
 }
 
+// 벽시계 시각(소수 시간, 예: 14.5 = 14:30) → work-time
+// 휴게 시간은 직전 work-time 으로 매핑
+export function wallToWorkTime(wall: number): number {
+  for (let i = 0; i < WORK_PERIODS.length; i++) {
+    const p = WORK_PERIODS[i];
+    if (wall < p.wallStart - EPS) {
+      // 이전 휴게 또는 시작 전 — 직전 wtStart 반환
+      return p.wtStart;
+    }
+    const wallEnd = p.wallStart + (p.wtEnd - p.wtStart);
+    if (wall <= wallEnd + EPS) {
+      return p.wtStart + (wall - p.wallStart);
+    }
+  }
+  return MAX_WORKTIME;
+}
+
 // work-time 구간 [a,b] 를 휴게로 분할한 벽시계 구간 목록으로
 export function splitWorkSegment(
   a: number,

@@ -4,7 +4,7 @@ import { useMemo, useCallback } from "react";
 import { ClockInView, type ClockInConfig } from "@/components/ClockInView";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useDaerimRealloc } from "@/components/useDaerimRealloc";
-import { computeReallocation } from "@/lib/calc/reallocation";
+import { computeReallocation, wallToWorkTime } from "@/lib/calc/reallocation";
 import { computeUrgentByGroup, getUrgentFor } from "@/lib/calc/urgentLoad";
 import type { Employee } from "@/lib/types";
 import { PACKAGE2_FEEDER_WORKERS } from "@/lib/types";
@@ -66,17 +66,23 @@ export function DaerimClockInView() {
   const bulkMoveWorkers = useDataStore((s) => s.bulkMoveWorkers);
   const { groups, extraFree, lineWorkers } = useDaerimRealloc();
 
-  // 재배치 계획의 자동 배치 로직 — 같은 알고리즘 결과로 라인 재배치
+  // 재배치 계획의 자동 배치 로직 — 현재 시각까지 진행된 이동만 적용
   const handleAutoPlace = useCallback(() => {
     const result = computeReallocation(groups, 0, 8, extraFree, false, true);
-    // 각 워커의 '최종 도착 라인' 계산
+    // 현재 시각 → work-time 변환 (08:30 = wt 0)
+    const now = new Date();
+    const wall = now.getHours() + now.getMinutes() / 60;
+    const currentWt = wallToWorkTime(wall);
+    // 각 워커의 '현재 시각까지의 도착 라인' 계산
     const byLine: Record<string, string[]> = {};
     const finalLineByName: Record<string, string> = {};
     for (const [line, workers] of Object.entries(lineWorkers)) {
       byLine[line] = [...workers];
       for (const w of workers) finalLineByName[w] = line;
     }
-    const sortedMoves = [...result.moves].sort((a, b) => a.time - b.time);
+    const sortedMoves = [...result.moves]
+      .filter((m) => m.time <= currentWt + 1e-6)
+      .sort((a, b) => a.time - b.time);
     for (const m of sortedMoves) {
       for (let i = 0; i < m.count; i++) {
         const fromList = byLine[m.from] ?? [];
