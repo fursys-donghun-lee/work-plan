@@ -69,48 +69,78 @@ export function DaerimClockInView() {
   const workDate = useDataStore((s) => s.workDate);
   const { groups, extraFree, lineWorkers } = useDaerimRealloc();
 
-  // 재배치 가이드 — 현재 시각까지 진행돼야 할 이동만 권장 목록으로 반환 (자동 적용 X)
+  // 재배치 가이드 — 현재 시각의 라인별 목표 인원 기준 minimum-churn 배치
+  //   원래 라인이 여전히 그 인원을 필요로 하면 그대로 유지 (불필요 이동 방지)
   const computeAutoPlaceGuide = useCallback((): GuideMove[] => {
     const result = computeReallocation(groups, 0, 8, extraFree, false, true);
     const now = new Date();
     const wall = now.getHours() + now.getMinutes() / 60;
     const currentWt = wallToWorkTime(wall);
-    // 각 워커의 출발 라인 (기본 위치) + 현재 시각까지의 도착 라인 계산
-    const byLine: Record<string, string[]> = {};
-    const startLineByName: Record<string, string> = {};
-    const finalLineByName: Record<string, string> = {};
+
+    // 1) 현재 시각의 라인별 목표 인원 산출
+    const targets = new Map<string, number>();
+    for (const t of result.timelines) {
+      let target = 0;
+      for (const seg of t.segments) {
+        if (seg.start <= currentWt + 1e-6 && currentWt < seg.end + 1e-6) {
+          target = seg.base + seg.added;
+          break;
+        }
+      }
+      targets.set(t.name, target);
+    }
+
+    // 2) 워커 초기 배치 + 원래 라인 기억
+    const allocation = new Map<string, string[]>();
+    const originLineOf = new Map<string, string>();
     for (const [line, workers] of Object.entries(lineWorkers)) {
-      byLine[line] = [...workers];
-      for (const w of workers) {
-        startLineByName[w] = line;
-        finalLineByName[w] = line;
+      allocation.set(line, [...workers]);
+      for (const w of workers) originLineOf.set(w, line);
+    }
+
+    // 3) 초과 인원 추출 (원래 라인의 target 까지만 유지)
+    const excess: string[] = [];
+    const needs = new Map<string, number>();
+    for (const [line, workers] of allocation) {
+      const target = targets.get(line) ?? 0;
+      if (workers.length > target) {
+        const removed = workers.splice(target);
+        excess.push(...removed);
+      } else if (workers.length < target) {
+        needs.set(line, target - workers.length);
       }
     }
-    const sortedMoves = [...result.moves]
-      .filter((m) => m.time <= currentWt + 1e-6)
-      .sort((a, b) => a.time - b.time);
-    for (const m of sortedMoves) {
-      for (let i = 0; i < m.count; i++) {
-        const fromList = byLine[m.from] ?? [];
-        const worker = fromList.shift();
-        if (!worker) continue;
-        if (!byLine[m.to]) byLine[m.to] = [];
-        byLine[m.to].push(worker);
-        finalLineByName[worker] = m.to;
+    // lineWorkers 에 없던 라인이 target>0 이면 needs 에 추가
+    for (const [line, target] of targets) {
+      if (!allocation.has(line) && target > 0) {
+        needs.set(line, target);
+        allocation.set(line, []);
       }
     }
-    // 이동이 필요한 인원만 (출발 != 도착) 가이드 항목으로
+
+    // 4) 초과 인원을 부족 라인에 배정
+    for (const [line, count] of needs) {
+      for (let i = 0; i < count; i++) {
+        const worker = excess.shift();
+        if (!worker) break;
+        allocation.get(line)!.push(worker);
+      }
+    }
+
+    // 5) 가이드 생성 — 원래 라인과 다른 라인에 있는 워커만
     const nameToEmp = new Map<string, Employee>();
     for (const e of employees) {
       if (e.department.includes("대림산업")) nameToEmp.set(e.name, e);
     }
     const guides: GuideMove[] = [];
-    for (const [name, toLine] of Object.entries(finalLineByName)) {
-      const fromLine = startLineByName[name] ?? "";
-      if (fromLine === toLine) continue;
-      const emp = nameToEmp.get(name);
-      if (!emp) continue;
-      guides.push({ empCode: emp.empCode, name, fromLine, toLine });
+    for (const [line, workers] of allocation) {
+      for (const w of workers) {
+        const origin = originLineOf.get(w);
+        if (!origin || origin === line) continue;
+        const emp = nameToEmp.get(w);
+        if (!emp) continue;
+        guides.push({ empCode: emp.empCode, name: w, fromLine: origin, toLine: line });
+      }
     }
     return guides;
   }, [groups, extraFree, lineWorkers, employees]);
