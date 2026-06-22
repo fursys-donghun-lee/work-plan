@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { ClockInView, type ClockInConfig } from "@/components/ClockInView";
 import { useDataStore } from "@/lib/store/useDataStore";
+import { useDohoPackage1Realloc } from "@/components/useDohoPackage1Realloc";
+import { computeReallocation } from "@/lib/calc/reallocation";
 import { computeUrgentByGroup, getUrgentFor } from "@/lib/calc/urgentLoad";
 import type { Employee } from "@/lib/types";
 
@@ -34,8 +36,11 @@ const SLOT_TO_URGENT_KEY: Record<string, string> = Object.fromEntries(
   Object.entries(POSITION_TO_SLOT).map(([pos, slot]) => [slot, pos])
 );
 
+// 재배치 알고리즘의 그룹명 ('포장1(CR1)') → 현장 슬롯명 ('CR1') 매핑
+// — 재배치 결과를 현장 슬롯에 적용할 때 사용
+const REALLOC_GROUP_TO_SLOT: Record<string, string> = POSITION_TO_SLOT;
+
 function slotFor(e: Employee, packagePos: Map<string, string>): string {
-  // 물류 카테고리는 항상 물류 슬롯
   if (e.category === "물류") return "물류";
   const pkgPos = packagePos.get(e.empCode);
   if (pkgPos && POSITION_TO_SLOT[pkgPos]) return POSITION_TO_SLOT[pkgPos];
@@ -54,21 +59,63 @@ function classifyGroup(
   return null;
 }
 
-const config: ClockInConfig = {
-  companyDept: "다호산업",
-  selfLines: ["포장1라인"],
-  defaultSupportTarget: "포장1라인",
-  pageTitle: "다호산업 · 포장1라인 현장 대시보드",
-  lineGrid: LINE_GRID,
-  slotFor,
-  classifyGroup,
-  // 다호산업 중 구분이 포장1라인 / 물류 인 직원만 노출
-  categoryFilter: (e) => e.category === "포장1라인" || e.category === "물류",
-};
-
 export function DohoPackage1ClockInView() {
+  const employees = useDataStore((s) => s.employees);
   const urgentProduction = useDataStore((s) => s.urgentProduction);
   const workDate = useDataStore((s) => s.workDate);
+  const bulkMoveWorkers = useDataStore((s) => s.bulkMoveWorkers);
+  const { groups, extraFree, lineWorkers } = useDohoPackage1Realloc();
+
+  // 재배치 계획의 자동 배치 로직
+  const handleAutoPlace = useCallback(() => {
+    const result = computeReallocation(groups, 0, 8, extraFree, false, true);
+    const byLine: Record<string, string[]> = {};
+    const finalLineByName: Record<string, string> = {};
+    for (const [line, workers] of Object.entries(lineWorkers)) {
+      byLine[line] = [...workers];
+      for (const w of workers) finalLineByName[w] = line;
+    }
+    const sortedMoves = [...result.moves].sort((a, b) => a.time - b.time);
+    for (const m of sortedMoves) {
+      for (let i = 0; i < m.count; i++) {
+        const fromList = byLine[m.from] ?? [];
+        const worker = fromList.shift();
+        if (!worker) continue;
+        if (!byLine[m.to]) byLine[m.to] = [];
+        byLine[m.to].push(worker);
+        finalLineByName[worker] = m.to;
+      }
+    }
+    const nameToEmp = new Map<string, Employee>();
+    for (const e of employees) {
+      if (e.department.includes("다호산업")) nameToEmp.set(e.name, e);
+    }
+    const moves: Array<{ empCode: string; name: string; toLine: string }> = [];
+    for (const [name, line] of Object.entries(finalLineByName)) {
+      const emp = nameToEmp.get(name);
+      if (!emp) continue;
+      // 재배치 그룹명 → 현장 슬롯명 변환
+      const toLine = REALLOC_GROUP_TO_SLOT[line] ?? line;
+      moves.push({ empCode: emp.empCode, name, toLine });
+    }
+    bulkMoveWorkers(moves);
+  }, [groups, extraFree, lineWorkers, employees, bulkMoveWorkers]);
+
+  const config = useMemo<ClockInConfig>(
+    () => ({
+      companyDept: "다호산업",
+      selfLines: ["포장1라인"],
+      defaultSupportTarget: "포장1라인",
+      pageTitle: "다호산업 · 포장1라인 현장 대시보드",
+      lineGrid: LINE_GRID,
+      slotFor,
+      classifyGroup,
+      categoryFilter: (e) => e.category === "포장1라인" || e.category === "물류",
+      onAutoPlace: handleAutoPlace,
+    }),
+    [handleAutoPlace]
+  );
+
   const urgentSlots = useMemo(() => {
     const m = computeUrgentByGroup(urgentProduction, workDate);
     const set = new Set<string>();
@@ -80,5 +127,6 @@ export function DohoPackage1ClockInView() {
     }
     return set;
   }, [urgentProduction, workDate]);
+
   return <ClockInView config={config} urgentSlots={urgentSlots} />;
 }

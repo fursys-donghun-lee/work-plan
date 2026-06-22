@@ -34,6 +34,8 @@ export interface ClockInConfig {
   // 직원 필터 (선택) — true 인 직원만 대시보드에 노출 (구분 필터 등)
   //   companyDept 매칭 이후 추가로 적용됨
   categoryFilter?: (e: Employee) => boolean;
+  // 자동 재배치 콜백 — 제공되면 '재배치' 버튼 노출
+  onAutoPlace?: () => void;
 }
 
 export interface ClockInViewProps {
@@ -65,6 +67,7 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
   const moveWorkerLine = useDataStore((s) => s.moveWorkerLine);
   const returnFromSupport = useDataStore((s) => s.returnFromSupport);
   const bulkClockIn = useDataStore((s) => s.bulkClockIn);
+  const resetLinePlacements = useDataStore((s) => s.resetLinePlacements);
 
   const GRID_LINES = useMemo(
     () => new Set<string>(config.lineGrid.flat()),
@@ -284,6 +287,23 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
     moveWorkerLine(empCode, name, fromLine, toLine);
   };
 
+  // 출근 위치로 초기화 — 현재 대시보드의 인원 라인 override 제거
+  //   (지원 상태인 인원은 store 내부에서 자동 제외)
+  const handleResetPlacements = () => {
+    if (!window.confirm("출근한 인원을 모두 기본 근무위치로 되돌릴까요?"))
+      return;
+    const empCodes = Array.from(currentSlotMap.keys());
+    resetLinePlacements(empCodes);
+  };
+
+  // 자동 재배치 — config 가 제공한 콜백 호출
+  const handleAutoPlace = () => {
+    if (!config.onAutoPlace) return;
+    if (!window.confirm("자동 재배치를 적용할까요? (출근한 인원 한정, 지원 중인 인원 제외)"))
+      return;
+    config.onAutoPlace();
+  };
+
   // 일괄 출근 — 출근 전 인원 모두 출근 처리
   const handleBulkClockIn = () => {
     const workers: Array<{ empCode: string; name: string; line: string }> = [];
@@ -322,7 +342,7 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
             </span>
           </p>
         </div>
-        <div className="flex gap-2 items-stretch">
+        <div className="flex gap-2 items-stretch flex-wrap">
           <button
             type="button"
             onClick={handleBulkClockIn}
@@ -333,7 +353,7 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
                 ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
                 : "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700"
             )}
-            title="출근 전 인원 전체 출근 처리 (미출근자는 칩을 눌러 별도 처리)"
+            title="출근 전 인원 전체 출근 처리"
           >
             일괄 출근처리
             {notClockedInTotal > 0 && (
@@ -341,6 +361,36 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
                 ({notClockedInTotal}명)
               </span>
             )}
+          </button>
+          {config.onAutoPlace && (
+            <button
+              type="button"
+              onClick={handleAutoPlace}
+              disabled={stats.present === 0}
+              className={cn(
+                "px-4 py-1.5 rounded-lg font-bold text-sm border-2 transition-colors",
+                stats.present === 0
+                  ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                  : "bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700"
+              )}
+              title="재배치 계획의 자동 배치 로직을 현재 출근 인원에 적용"
+            >
+              ✨ 재배치
+            </button>
+          )}
+          <button
+            type="button"
+            onClick={handleResetPlacements}
+            disabled={stats.present === 0}
+            className={cn(
+              "px-4 py-1.5 rounded-lg font-bold text-sm border-2 transition-colors",
+              stats.present === 0
+                ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                : "bg-white hover:bg-slate-50 text-slate-700 border-slate-300"
+            )}
+            title="출근한 모든 인원을 기본 근무위치로 되돌리기 (지원 중 인원 제외)"
+          >
+            ↺ 출근 위치로 초기화
           </button>
           <div className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
             <div className="text-[11px] text-slate-500">총인원</div>

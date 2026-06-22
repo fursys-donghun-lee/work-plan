@@ -149,6 +149,13 @@ interface DataState {
   bulkClockIn: (
     workers: Array<{ empCode: string; name: string; line: string }>
   ) => void;
+  // 출근 위치로 초기화 — currentLineOverrides 에서 지원 상태 외 모두 제거
+  //   (제거된 직원은 default 슬롯으로 자동 복귀)
+  resetLinePlacements: (empCodes: string[]) => void;
+  // 일괄 라인 이동 — 자동 재배치 결과 적용
+  bulkMoveWorkers: (
+    moves: Array<{ empCode: string; name: string; toLine: string }>
+  ) => void;
   // 일일 초기화 — 다음날이 되면 현장 대시보드 상태 모두 리셋
   resetDailyClockInState: (today: string) => void;
   setWorkDate: (workDate: string) => void;
@@ -553,6 +560,44 @@ export const useDataStore = create<DataState>()(
             workLog: [...state.workLog, ...newLogEntries],
             manualClockIns: nextClockIns,
             currentLineOverrides: nextOverrides,
+          };
+        }),
+      // 출근 위치로 초기화 — 주어진 empCodes 의 currentLineOverrides 제거
+      //   (지원 상태는 보존)
+      resetLinePlacements: (empCodes) =>
+        set((state) => {
+          const next = { ...state.currentLineOverrides };
+          for (const ec of empCodes) {
+            if (next[ec] === "지원") continue;
+            delete next[ec];
+          }
+          return { currentLineOverrides: next };
+        }),
+      // 일괄 라인 이동 — 자동 재배치 결과 적용 (no-op 이동은 skip)
+      bulkMoveWorkers: (moves) =>
+        set((state) => {
+          const now = new Date();
+          const nextOverrides = { ...state.currentLineOverrides };
+          const newLogEntries: WorkLogEntry[] = [];
+          for (const { empCode, name, toLine } of moves) {
+            const fromLine = nextOverrides[empCode] || "";
+            if (fromLine === toLine) continue; // no change
+            if (fromLine === "지원") continue; // 지원 중인 인원은 자동배치에서 제외
+            newLogEntries.push({
+              id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
+              empCode,
+              name,
+              workDate: state.workDate,
+              timestamp: now.toISOString(),
+              action: "이동",
+              fromLine,
+              toLine,
+            });
+            nextOverrides[empCode] = toLine;
+          }
+          return {
+            currentLineOverrides: nextOverrides,
+            workLog: [...state.workLog, ...newLogEntries],
           };
         }),
       // 일일 초기화 — 모든 현장 대시보드 상태 리셋 (출근/이동/지원/attendance.isPresent)

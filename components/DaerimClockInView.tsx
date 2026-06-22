@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo } from "react";
+import { useMemo, useCallback } from "react";
 import { ClockInView, type ClockInConfig } from "@/components/ClockInView";
 import { useDataStore } from "@/lib/store/useDataStore";
+import { useDaerimRealloc } from "@/components/useDaerimRealloc";
+import { computeReallocation } from "@/lib/calc/reallocation";
 import { computeUrgentByGroup, getUrgentFor } from "@/lib/calc/urgentLoad";
 import type { Employee } from "@/lib/types";
 import { PACKAGE2_FEEDER_WORKERS } from "@/lib/types";
@@ -57,20 +59,63 @@ function classifyGroup(
   return null;
 }
 
-const config: ClockInConfig = {
-  companyDept: "대림산업",
-  selfLines: ["포장2라인"],
-  defaultSupportTarget: "포장2라인",
-  pageTitle: "대림산업 · 현장 대시보드",
-  lineGrid: LINE_GRID,
-  slotFor,
-  classifyGroup,
-  displayLineName: (l) => (l === "자동포장라인" ? "자동포장" : l),
-};
-
 export function DaerimClockInView() {
+  const employees = useDataStore((s) => s.employees);
   const urgentProduction = useDataStore((s) => s.urgentProduction);
   const workDate = useDataStore((s) => s.workDate);
+  const bulkMoveWorkers = useDataStore((s) => s.bulkMoveWorkers);
+  const { groups, extraFree, lineWorkers } = useDaerimRealloc();
+
+  // 재배치 계획의 자동 배치 로직 — 같은 알고리즘 결과로 라인 재배치
+  const handleAutoPlace = useCallback(() => {
+    const result = computeReallocation(groups, 0, 8, extraFree, false, true);
+    // 각 워커의 '최종 도착 라인' 계산
+    const byLine: Record<string, string[]> = {};
+    const finalLineByName: Record<string, string> = {};
+    for (const [line, workers] of Object.entries(lineWorkers)) {
+      byLine[line] = [...workers];
+      for (const w of workers) finalLineByName[w] = line;
+    }
+    const sortedMoves = [...result.moves].sort((a, b) => a.time - b.time);
+    for (const m of sortedMoves) {
+      for (let i = 0; i < m.count; i++) {
+        const fromList = byLine[m.from] ?? [];
+        const worker = fromList.shift();
+        if (!worker) continue;
+        if (!byLine[m.to]) byLine[m.to] = [];
+        byLine[m.to].push(worker);
+        finalLineByName[worker] = m.to;
+      }
+    }
+    // name → empCode 매핑 + 이동 list 생성
+    const nameToEmp = new Map<string, Employee>();
+    for (const e of employees) {
+      if (e.department.includes("대림산업")) nameToEmp.set(e.name, e);
+    }
+    const moves: Array<{ empCode: string; name: string; toLine: string }> = [];
+    for (const [name, line] of Object.entries(finalLineByName)) {
+      const emp = nameToEmp.get(name);
+      if (!emp) continue;
+      moves.push({ empCode: emp.empCode, name, toLine: line });
+    }
+    bulkMoveWorkers(moves);
+  }, [groups, extraFree, lineWorkers, employees, bulkMoveWorkers]);
+
+  const config = useMemo<ClockInConfig>(
+    () => ({
+      companyDept: "대림산업",
+      selfLines: ["포장2라인"],
+      defaultSupportTarget: "포장2라인",
+      pageTitle: "대림산업 · 현장 대시보드",
+      lineGrid: LINE_GRID,
+      slotFor,
+      classifyGroup,
+      displayLineName: (l) => (l === "자동포장라인" ? "자동포장" : l),
+      onAutoPlace: handleAutoPlace,
+    }),
+    [handleAutoPlace]
+  );
+
   const urgentSlots = useMemo(() => {
     const m = computeUrgentByGroup(urgentProduction, workDate);
     const set = new Set<string>();
@@ -80,5 +125,6 @@ export function DaerimClockInView() {
     }
     return set;
   }, [urgentProduction, workDate]);
+
   return <ClockInView config={config} urgentSlots={urgentSlots} />;
 }
