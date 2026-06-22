@@ -37,6 +37,7 @@ const DAILY_KEYS = [
   "manualClockIns",
   "supportTargetMap",
   "lastDailyReset",
+  "deletedWorkLogIds",
 ] as const;
 const PLAN_KEYS = [
   // 대림 포장2라인
@@ -644,19 +645,23 @@ export function SyncProvider({ children }: { children: React.ReactNode }) {
           update.attendance = local.attendance;
           update.lastDailyReset = localResetDate;
         }
-        // workLog: id 기반 union (로컬·리모트 모두 보존)
+        // workLog: id 기반 union (로컬·리모트 모두 보존) + deletedWorkLogIds 필터
         const localLog = local.workLog as Array<{ id?: string }> | undefined;
         const remoteLog = update.workLog as Array<{ id?: string }> | undefined;
+        const localDeleted = (local.deletedWorkLogIds as string[]) ?? [];
+        const remoteDeleted = (update.deletedWorkLogIds as string[]) ?? [];
+        const mergedDeletedSet = new Set([...localDeleted, ...remoteDeleted]);
         if (Array.isArray(localLog) || Array.isArray(remoteLog)) {
           const map = new Map<string, unknown>();
           for (const e of remoteLog ?? []) {
-            if (e?.id) map.set(e.id, e);
+            if (e?.id && !mergedDeletedSet.has(e.id)) map.set(e.id, e);
           }
           for (const e of localLog ?? []) {
-            if (e?.id) map.set(e.id, e);
+            if (e?.id && !mergedDeletedSet.has(e.id)) map.set(e.id, e);
           }
           update.workLog = Array.from(map.values());
         }
+        update.deletedWorkLogIds = Array.from(mergedDeletedSet);
 
         useDataStore.setState(stripUndefined(update) as never, false);
         dailyInitialSyncDone = true;

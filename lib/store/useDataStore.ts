@@ -111,6 +111,9 @@ interface DataState {
   supportTargetMap: SupportTargetMap;
   // 마지막 일일 초기화 날짜 (YYYY-MM-DD) — 자정 넘어가면 reset 실행 트리거
   lastDailyReset: string;
+  // 삭제된 workLog id 추적 (미출근 처리 시 다른 PC 의 스냅샷이 복원 못 하도록)
+  //   일일 초기화 때 함께 정리됨
+  deletedWorkLogIds: string[];
 
   // Actions
   setSelectedCompany: (company: Company) => void;
@@ -265,6 +268,7 @@ export const useDataStore = create<DataState>()(
       manualClockIns: {},
       supportTargetMap: {},
       lastDailyReset: "",
+      deletedWorkLogIds: [],
 
       setSelectedCompany: (company) => set({ selectedCompany: company }),
       setCompanyChosen: (chosen) => set({ companyChosen: chosen }),
@@ -368,19 +372,39 @@ export const useDataStore = create<DataState>()(
           };
         }),
       // 미출근/퇴근 — manualClockIns + attendance + override 모두 정리
-      //   action 인자로 '미출근' / '퇴근' 구분 로깅
+      //   미출근 = 안 옴 (오늘 그 사람의 workLog 전체 제거 — 흔적 없음)
+      //   퇴근   = 왔다가 감 (퇴근 entry 추가)
       clockOutEmployee: (empCode, name, line, action = "미출근") =>
         set((state) => {
           const now = new Date();
-          const logEntry: WorkLogEntry = {
-            id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
-            empCode,
-            name,
-            workDate: state.workDate,
-            timestamp: now.toISOString(),
-            action,
-            line: line || "",
-          };
+          let nextWorkLog: WorkLogEntry[];
+          let nextDeletedIds = state.deletedWorkLogIds;
+          if (action === "미출근") {
+            // 오늘 그 사람의 모든 workLog entry 제거 (출근·이동·지원 다 삭제)
+            const deletedIds: string[] = [];
+            nextWorkLog = state.workLog.filter((e) => {
+              if (e.empCode === empCode && e.workDate === state.workDate) {
+                deletedIds.push(e.id);
+                return false;
+              }
+              return true;
+            });
+            // 다른 PC 의 스냅샷이 union 으로 복원 못 하도록 ID 추적
+            if (deletedIds.length > 0) {
+              nextDeletedIds = [...state.deletedWorkLogIds, ...deletedIds];
+            }
+          } else {
+            const logEntry: WorkLogEntry = {
+              id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
+              empCode,
+              name,
+              workDate: state.workDate,
+              timestamp: now.toISOString(),
+              action: "퇴근",
+              line: line || "",
+            };
+            nextWorkLog = [...state.workLog, logEntry];
+          }
           const idx = state.attendance.findIndex((a) => a.empCode === empCode);
           let nextAttendance = state.attendance;
           if (idx >= 0) {
@@ -399,7 +423,8 @@ export const useDataStore = create<DataState>()(
           delete nextSupport[empCode];
           return {
             attendance: nextAttendance,
-            workLog: [...state.workLog, logEntry],
+            workLog: nextWorkLog,
+            deletedWorkLogIds: nextDeletedIds,
             manualClockIns: nextClockIns,
             currentLineOverrides: nextOverrides,
             supportTargetMap: nextSupport,
@@ -538,6 +563,7 @@ export const useDataStore = create<DataState>()(
           manualClockIns: {},
           currentLineOverrides: {},
           supportTargetMap: {},
+          deletedWorkLogIds: [],
           attendance: state.attendance.map((a) => ({
             ...a,
             isPresent: false,
