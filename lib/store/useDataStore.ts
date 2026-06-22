@@ -133,7 +133,12 @@ interface DataState {
   deleteLineBase: (index: number) => void;
   setAttendance: (data: AttendanceRecord[], workDate: string, meta: UploadMeta) => void;
   clockInEmployee: (empCode: string, name: string, line?: string) => void;
-  clockOutEmployee: (empCode: string, name: string, line?: string) => void;
+  clockOutEmployee: (
+    empCode: string,
+    name: string,
+    line?: string,
+    action?: "미출근" | "퇴근"
+  ) => void;
   logSupport: (empCode: string, name: string, line: string, targetLine: SupportTargetLineName) => void;
   moveWorkerLine: (empCode: string, name: string, fromLine: string, toLine: string) => void;
   returnFromSupport: (empCode: string, name: string, defaultLine: string) => void;
@@ -363,8 +368,8 @@ export const useDataStore = create<DataState>()(
           };
         }),
       // 미출근/퇴근 — manualClockIns + attendance + override 모두 정리
-      //   (현장 대시보드는 출근 취소 의미로 '미출근' 으로 기록)
-      clockOutEmployee: (empCode, name, line) =>
+      //   action 인자로 '미출근' / '퇴근' 구분 로깅
+      clockOutEmployee: (empCode, name, line, action = "미출근") =>
         set((state) => {
           const now = new Date();
           const logEntry: WorkLogEntry = {
@@ -373,7 +378,7 @@ export const useDataStore = create<DataState>()(
             name,
             workDate: state.workDate,
             timestamp: now.toISOString(),
-            action: "미출근",
+            action,
             line: line || "",
           };
           const idx = state.attendance.findIndex((a) => a.empCode === empCode);

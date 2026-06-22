@@ -13,6 +13,7 @@ interface Props {
   isSupporting: boolean;
   onClose: () => void;
   onClockIn: () => void;
+  onMarkAbsent: () => void;
   onClockOut: () => void;
   onSupport: (targetLine: SupportTargetLineName) => void;
   onReturn: () => void;
@@ -29,6 +30,7 @@ export function ActionModal({
   isSupporting,
   onClose,
   onClockIn,
+  onMarkAbsent,
   onClockOut,
   onSupport,
   onReturn,
@@ -83,7 +85,7 @@ export function ActionModal({
 
         {stage === "main" ? (
           <>
-            <div className="grid grid-cols-3 gap-2 mb-3">
+            <div className="grid grid-cols-2 gap-2 mb-3">
               {isSupporting ? (
                 <ActionButton
                   label="복귀"
@@ -101,6 +103,12 @@ export function ActionModal({
               <ActionButton
                 label="미출근"
                 tone="rose"
+                disabled={!isPresent}
+                onClick={onMarkAbsent}
+              />
+              <ActionButton
+                label="퇴근"
+                tone="amber"
                 disabled={!isPresent}
                 onClick={onClockOut}
               />
@@ -155,7 +163,7 @@ function ActionButton({
   onClick,
 }: {
   label: string;
-  tone: "emerald" | "rose" | "blue";
+  tone: "emerald" | "rose" | "amber" | "blue";
   disabled?: boolean;
   onClick: () => void;
 }) {
@@ -163,6 +171,7 @@ function ActionButton({
     emerald:
       "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700",
     rose: "bg-rose-600 hover:bg-rose-700 text-white border-rose-700",
+    amber: "bg-amber-600 hover:bg-amber-700 text-white border-amber-700",
     blue: "bg-blue-600 hover:bg-blue-700 text-white border-blue-700",
   };
   return (

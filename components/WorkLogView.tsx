@@ -8,8 +8,8 @@ import type { Employee, WorkLogEntry, WorkLogAction } from "@/lib/types";
 
 const ACTION_TONE: Record<WorkLogAction, string> = {
   출근: "bg-emerald-100 text-emerald-800 border-emerald-300",
-  퇴근: "bg-rose-100 text-rose-800 border-rose-300",
   미출근: "bg-rose-100 text-rose-800 border-rose-300",
+  퇴근: "bg-orange-100 text-orange-800 border-orange-300",
   지원: "bg-blue-100 text-blue-800 border-blue-300",
   이동: "bg-amber-100 text-amber-800 border-amber-300",
 };
@@ -153,7 +153,7 @@ export function WorkLogView({
       <div className="card border-slate-200 bg-slate-50/50">
         <h3 className="font-semibold text-slate-800 mb-2 text-sm">색상 안내</h3>
         <div className="flex flex-wrap gap-2 text-xs">
-          {(["출근", "미출근", "지원", "이동"] as WorkLogAction[]).map((a) => (
+          {(["출근", "미출근", "퇴근", "지원", "이동"] as WorkLogAction[]).map((a) => (
             <span
               key={a}
               className={cn(

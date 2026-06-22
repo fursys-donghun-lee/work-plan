@@ -253,8 +253,12 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
     clockInEmployee(modal.empCode, modal.name, defaultLine);
     closeModal();
   };
+  const handleMarkAbsent = () => {
+    clockOutEmployee(modal.empCode, modal.name, modal.currentLine, "미출근");
+    closeModal();
+  };
   const handleClockOut = () => {
-    clockOutEmployee(modal.empCode, modal.name, modal.currentLine);
+    clockOutEmployee(modal.empCode, modal.name, modal.currentLine, "퇴근");
     closeModal();
   };
   const handleSupport = (targetLine: SupportTargetLineName) => {
@@ -498,6 +502,7 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
         isSupporting={modal.isSupporting}
         onClose={closeModal}
         onClockIn={handleClockIn}
+        onMarkAbsent={handleMarkAbsent}
         onClockOut={handleClockOut}
         onSupport={handleSupport}
         onReturn={handleReturn}
