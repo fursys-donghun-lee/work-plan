@@ -225,6 +225,9 @@ export function DohoPackage1ClockInView() {
       }
     }
 
+    const remainingGroupsMap = new Map(
+      remainingGroups.map((g) => [g.name, g])
+    );
     const guides: GuideMove[] = [];
     for (const [rawLine, workers] of allocation) {
       for (const w of workers) {
@@ -235,7 +238,19 @@ export function DohoPackage1ClockInView() {
         const fromLine =
           rawOrigin === "지원" ? "지원" : REALLOC_GROUP_TO_SLOT[rawOrigin] ?? rawOrigin;
         const toLine = REALLOC_GROUP_TO_SLOT[rawLine] ?? rawLine;
-        guides.push({ empCode: emp.empCode, name: w, fromLine, toLine });
+        const target = remainingGroupsMap.get(rawLine);
+        const reason: "urgent" | "overtime" | "load" = target?.urgent
+          ? "urgent"
+          : currentWt >= 8
+            ? "overtime"
+            : "load";
+        guides.push({
+          empCode: emp.empCode,
+          name: w,
+          fromLine,
+          toLine,
+          reason,
+        });
       }
     }
     return guides;
@@ -249,6 +264,11 @@ export function DohoPackage1ClockInView() {
     supportTargetMap,
   ]);
 
+  const plannedOvertime = useMemo(() => {
+    const result = computeReallocation(groups, 0, 8, extraFree, false, true);
+    return result.overtimePeople;
+  }, [groups, extraFree]);
+
   const config = useMemo<ClockInConfig>(
     () => ({
       companyDept: "다호산업",
@@ -260,8 +280,9 @@ export function DohoPackage1ClockInView() {
       classifyGroup,
       categoryFilter: (e) => e.category === "포장1라인" || e.category === "물류",
       computeAutoPlaceGuide,
+      plannedOvertimePeople: plannedOvertime,
     }),
-    [computeAutoPlaceGuide]
+    [computeAutoPlaceGuide, plannedOvertime]
   );
 
   const urgentSlots = useMemo(() => {

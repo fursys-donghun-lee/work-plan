@@ -223,7 +223,10 @@ export function DaerimClockInView() {
       }
     }
 
-    // 6) 가이드 생성
+    // 6) 가이드 생성 (사유 태그 포함)
+    const remainingGroupsMap = new Map(
+      remainingGroups.map((g) => [g.name, g])
+    );
     const guides: GuideMove[] = [];
     for (const [line, workers] of allocation) {
       for (const w of workers) {
@@ -231,7 +234,19 @@ export function DaerimClockInView() {
         if (!origin || origin === line) continue;
         const emp = nameToEmp.get(w);
         if (!emp) continue;
-        guides.push({ empCode: emp.empCode, name: w, fromLine: origin, toLine: line });
+        const target = remainingGroupsMap.get(line);
+        const reason: "urgent" | "overtime" | "load" = target?.urgent
+          ? "urgent"
+          : currentWt >= 8
+            ? "overtime"
+            : "load";
+        guides.push({
+          empCode: emp.empCode,
+          name: w,
+          fromLine: origin,
+          toLine: line,
+          reason,
+        });
       }
     }
     return guides;
@@ -245,6 +260,12 @@ export function DaerimClockInView() {
     supportTargetMap,
   ]);
 
+  // 알고리즘 기준 잔업 예정 인원 (현재 출근 인원 기준)
+  const plannedOvertime = useMemo(() => {
+    const result = computeReallocation(groups, 0, 8, extraFree, false, true);
+    return result.overtimePeople;
+  }, [groups, extraFree]);
+
   const config = useMemo<ClockInConfig>(
     () => ({
       companyDept: "대림산업",
@@ -256,8 +277,9 @@ export function DaerimClockInView() {
       classifyGroup,
       displayLineName: (l) => (l === "자동포장라인" ? "자동포장" : l),
       computeAutoPlaceGuide,
+      plannedOvertimePeople: plannedOvertime,
     }),
-    [computeAutoPlaceGuide]
+    [computeAutoPlaceGuide, plannedOvertime]
   );
 
   const urgentSlots = useMemo(() => {
