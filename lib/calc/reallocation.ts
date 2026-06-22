@@ -703,6 +703,27 @@ export function workTimeToWall(wt: number): number {
   return last.wallStart + (last.wtEnd - last.wtStart) + (wt - last.wtEnd);
 }
 
+// 라인의 계획상 처리 부하 (timeline.segments 기준) — 어느 work-time 까지 진행됐는지
+export function plannedWorkDoneAt(
+  timeline: { segments: ReallocSegment[]; autoManaged: boolean },
+  wt: number
+): number {
+  let done = 0;
+  for (const seg of timeline.segments) {
+    const segStart = seg.start;
+    const segEnd = Math.min(seg.end, wt);
+    if (segEnd <= segStart) continue;
+    const hc = seg.base + seg.added;
+    let rate: number;
+    if (timeline.autoManaged) rate = hc;
+    else if (hc <= 0) rate = 0;
+    else if (hc === 1) rate = 0.6;
+    else rate = 2;
+    done += rate * (segEnd - segStart);
+  }
+  return done;
+}
+
 // 벽시계 시각(소수 시간, 예: 14.5 = 14:30) → work-time
 // 휴게 시간은 직전 work-time 으로 매핑
 export function wallToWorkTime(wall: number): number {

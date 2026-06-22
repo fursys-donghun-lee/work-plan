@@ -8,7 +8,11 @@ import {
 } from "@/components/ClockInView";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useDaerimRealloc } from "@/components/useDaerimRealloc";
-import { computeReallocation, wallToWorkTime } from "@/lib/calc/reallocation";
+import {
+  computeReallocation,
+  wallToWorkTime,
+  plannedWorkDoneAt,
+} from "@/lib/calc/reallocation";
 import { computeUrgentByGroup, getUrgentFor } from "@/lib/calc/urgentLoad";
 import type { Employee } from "@/lib/types";
 import { PACKAGE2_FEEDER_WORKERS } from "@/lib/types";
@@ -136,17 +140,50 @@ export function DaerimClockInView() {
       ...g,
       headcount: (effectiveLineWorkers[g.name] ?? []).length,
     }));
-    const result = computeReallocation(adjustedGroups, 0, 8, extraFree, false, true);
     const now = new Date();
     const wall = now.getHours() + now.getMinutes() / 60;
     const currentWt = wallToWorkTime(wall);
 
-    // 3) 현재 시각의 라인별 목표 인원
+    // 2-A) 1차 — 아침 기준 풀데이 계획 (남은 부하 추정용)
+    const firstPass = computeReallocation(
+      adjustedGroups,
+      0,
+      8,
+      extraFree,
+      false,
+      true
+    );
+
+    // 2-B) 라인별 남은 부하 + 긴급 처리 여부 추정 (현재 시각까지의 계획 처리량 기준)
+    const remainingGroups = adjustedGroups.map((g) => {
+      const t = firstPass.timelines.find((tl) => tl.name === g.name);
+      if (!t) return g;
+      const done = plannedWorkDoneAt(t, currentWt);
+      const remaining = Math.max(0, g.loadHours - done);
+      return {
+        ...g,
+        loadHours: remaining,
+        // 긴급건이 처리됐다면(남은 부하가 거의 없으면) urgent 해제
+        urgent: g.urgent && remaining > 0.5,
+      };
+    });
+
+    // 2-C) 2차 — 남은 부하 기준 재계획 (지금 이 시각의 권장 분포)
+    const result = computeReallocation(
+      remainingGroups,
+      0,
+      8,
+      extraFree,
+      false,
+      true
+    );
+
+    // 3) 현재 시각(=재계획의 wt=0)의 라인별 목표 인원
     const targets = new Map<string, number>();
     for (const t of result.timelines) {
       let target = 0;
       for (const seg of t.segments) {
-        if (seg.start <= currentWt + 1e-6 && currentWt < seg.end + 1e-6) {
+        if (seg.start <= 1e-6 && 0 < seg.end + 1e-6) {
           target = seg.base + seg.added;
           break;
         }

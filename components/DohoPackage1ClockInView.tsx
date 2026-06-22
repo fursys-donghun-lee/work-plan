@@ -8,7 +8,11 @@ import {
 } from "@/components/ClockInView";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useDohoPackage1Realloc } from "@/components/useDohoPackage1Realloc";
-import { computeReallocation, wallToWorkTime } from "@/lib/calc/reallocation";
+import {
+  computeReallocation,
+  wallToWorkTime,
+  plannedWorkDoneAt,
+} from "@/lib/calc/reallocation";
 import { computeUrgentByGroup, getUrgentFor } from "@/lib/calc/urgentLoad";
 import type { Employee } from "@/lib/types";
 
@@ -144,16 +148,46 @@ export function DohoPackage1ClockInView() {
       ...g,
       headcount: (effectiveLineWorkers[g.name] ?? []).length,
     }));
-    const result = computeReallocation(adjustedGroups, 0, 8, extraFree, false, true);
     const now = new Date();
     const wall = now.getHours() + now.getMinutes() / 60;
     const currentWt = wallToWorkTime(wall);
+
+    // 1차 — 아침 기준 풀데이 계획
+    const firstPass = computeReallocation(
+      adjustedGroups,
+      0,
+      8,
+      extraFree,
+      false,
+      true
+    );
+    // 라인별 남은 부하 / 긴급 처리 여부
+    const remainingGroups = adjustedGroups.map((g) => {
+      const t = firstPass.timelines.find((tl) => tl.name === g.name);
+      if (!t) return g;
+      const done = plannedWorkDoneAt(t, currentWt);
+      const remaining = Math.max(0, g.loadHours - done);
+      return {
+        ...g,
+        loadHours: remaining,
+        urgent: g.urgent && remaining > 0.5,
+      };
+    });
+    // 2차 — 남은 부하 기준 재계획
+    const result = computeReallocation(
+      remainingGroups,
+      0,
+      8,
+      extraFree,
+      false,
+      true
+    );
 
     const targets = new Map<string, number>();
     for (const t of result.timelines) {
       let target = 0;
       for (const seg of t.segments) {
-        if (seg.start <= currentWt + 1e-6 && currentWt < seg.end + 1e-6) {
+        if (seg.start <= 1e-6 && 0 < seg.end + 1e-6) {
           target = seg.base + seg.added;
           break;
         }
