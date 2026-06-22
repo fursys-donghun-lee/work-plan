@@ -58,6 +58,7 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
   const logSupport = useDataStore((s) => s.logSupport);
   const moveWorkerLine = useDataStore((s) => s.moveWorkerLine);
   const returnFromSupport = useDataStore((s) => s.returnFromSupport);
+  const bulkClockIn = useDataStore((s) => s.bulkClockIn);
 
   const GRID_LINES = useMemo(
     () => new Set<string>(config.lineGrid.flat()),
@@ -273,6 +274,26 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
     moveWorkerLine(empCode, name, fromLine, toLine);
   };
 
+  // 일괄 출근 — 출근 전 인원 모두 출근 처리
+  const handleBulkClockIn = () => {
+    const workers: Array<{ empCode: string; name: string; line: string }> = [];
+    for (const grp of Object.values(notClockedInGroups)) {
+      for (const e of grp) {
+        const line = defaultSlotMap.get(e.empCode) || "";
+        workers.push({ empCode: e.empCode, name: e.name, line });
+      }
+    }
+    if (workers.length === 0) return;
+    if (
+      !window.confirm(
+        `출근 전 ${workers.length}명을 모두 출근 처리합니다. 미출근자는 칩을 눌러서 따로 미출근 처리해주세요.`
+      )
+    ) {
+      return;
+    }
+    bulkClockIn(workers);
+  };
+
   const displayName = (line: string) =>
     config.displayLineName ? config.displayLineName(line) : line;
 
@@ -291,7 +312,26 @@ export function ClockInView({ config }: { config: ClockInConfig }) {
             </span>
           </p>
         </div>
-        <div className="flex gap-2">
+        <div className="flex gap-2 items-stretch">
+          <button
+            type="button"
+            onClick={handleBulkClockIn}
+            disabled={notClockedInTotal === 0}
+            className={cn(
+              "px-4 py-1.5 rounded-lg font-bold text-sm border-2 transition-colors",
+              notClockedInTotal === 0
+                ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
+                : "bg-emerald-600 hover:bg-emerald-700 text-white border-emerald-700"
+            )}
+            title="출근 전 인원 전체 출근 처리 (미출근자는 칩을 눌러 별도 처리)"
+          >
+            일괄 출근처리
+            {notClockedInTotal > 0 && (
+              <span className="ml-1.5 text-xs font-normal opacity-90">
+                ({notClockedInTotal}명)
+              </span>
+            )}
+          </button>
           <div className="px-3 py-1.5 rounded-lg bg-slate-50 border border-slate-200">
             <div className="text-[11px] text-slate-500">총인원</div>
             <div className="text-lg font-bold text-slate-800">

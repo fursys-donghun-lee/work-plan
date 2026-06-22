@@ -137,6 +137,10 @@ interface DataState {
   logSupport: (empCode: string, name: string, line: string, targetLine: SupportTargetLineName) => void;
   moveWorkerLine: (empCode: string, name: string, fromLine: string, toLine: string) => void;
   returnFromSupport: (empCode: string, name: string, defaultLine: string) => void;
+  // 일괄 출근 — 한 번에 여러 명 출근 처리
+  bulkClockIn: (
+    workers: Array<{ empCode: string; name: string; line: string }>
+  ) => void;
   // 일일 초기화 — 다음날이 되면 현장 대시보드 상태 모두 리셋
   resetDailyClockInState: (today: string) => void;
   setWorkDate: (workDate: string) => void;
@@ -358,7 +362,8 @@ export const useDataStore = create<DataState>()(
             currentLineOverrides: nextOverrides,
           };
         }),
-      // 퇴근 — manualClockIns + attendance + override 모두 정리
+      // 미출근/퇴근 — manualClockIns + attendance + override 모두 정리
+      //   (현장 대시보드는 출근 취소 의미로 '미출근' 으로 기록)
       clockOutEmployee: (empCode, name, line) =>
         set((state) => {
           const now = new Date();
@@ -368,7 +373,7 @@ export const useDataStore = create<DataState>()(
             name,
             workDate: state.workDate,
             timestamp: now.toISOString(),
-            action: "퇴근",
+            action: "미출근",
             line: line || "",
           };
           const idx = state.attendance.findIndex((a) => a.empCode === empCode);
@@ -469,6 +474,55 @@ export const useDataStore = create<DataState>()(
               [empCode]: defaultLine,
             },
             supportTargetMap: nextSupport,
+          };
+        }),
+      // 일괄 출근 — 여러 명 한꺼번에 출근 처리 (한 번의 setState 로 처리)
+      bulkClockIn: (workers) =>
+        set((state) => {
+          const now = new Date();
+          const hhmm = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+          const newLogEntries: WorkLogEntry[] = [];
+          const nextAttendance = [...state.attendance];
+          const nextClockIns = { ...state.manualClockIns };
+          const nextOverrides = { ...state.currentLineOverrides };
+
+          for (const { empCode, name, line } of workers) {
+            if (state.manualClockIns[empCode]) continue; // 이미 출근 — skip
+            newLogEntries.push({
+              id: `${now.getTime()}-${empCode}-${Math.random().toString(36).slice(2, 8)}`,
+              empCode,
+              name,
+              workDate: state.workDate,
+              timestamp: now.toISOString(),
+              action: "출근",
+              line: line || "",
+            });
+            const idx = nextAttendance.findIndex((a) => a.empCode === empCode);
+            if (idx >= 0) {
+              nextAttendance[idx] = {
+                ...nextAttendance[idx],
+                startTime: hhmm,
+                isPresent: true,
+                name: nextAttendance[idx].name || name,
+              };
+            } else {
+              nextAttendance.push({
+                empCode,
+                name,
+                workDate: state.workDate,
+                startTime: hhmm,
+                isPresent: true,
+              });
+            }
+            nextClockIns[empCode] = now.toISOString();
+            if (line) nextOverrides[empCode] = line;
+          }
+
+          return {
+            attendance: nextAttendance,
+            workLog: [...state.workLog, ...newLogEntries],
+            manualClockIns: nextClockIns,
+            currentLineOverrides: nextOverrides,
           };
         }),
       // 일일 초기화 — 모든 현장 대시보드 상태 리셋 (출근/이동/지원/attendance.isPresent)

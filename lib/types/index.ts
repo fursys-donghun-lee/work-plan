@@ -353,7 +353,8 @@ export interface Package1GroupLoad {
 }
 
 // === 출근/이동 로그 (인원별 근무관리) ===
-export type WorkLogAction = "출근" | "퇴근" | "지원" | "이동";
+//   미출근 = 출근 취소 (출근 했다가 빼거나, 안 왔다고 마킹)
+export type WorkLogAction = "출근" | "퇴근" | "미출근" | "지원" | "이동";
 
 export interface WorkLogEntry {
   id: string;            // 고유 ID (timestamp + empCode + random)

@@ -99,7 +99,7 @@ export function ActionModal({
                 />
               )}
               <ActionButton
-                label="퇴근"
+                label="미출근"
                 tone="rose"
                 disabled={!isPresent}
                 onClick={onClockOut}
