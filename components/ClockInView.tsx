@@ -599,13 +599,10 @@ function GuideCard({
 }) {
   const now = new Date();
   const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
-  // 도착 라인별로 그룹화 — 어디로 가야 하는지 한눈에 보기
-  const byTarget = new Map<string, GuideMove[]>();
-  for (const m of moves) {
-    if (!byTarget.has(m.toLine)) byTarget.set(m.toLine, []);
-    byTarget.get(m.toLine)!.push(m);
-  }
-  const targets = Array.from(byTarget.keys()).sort();
+  // 이름 가나다순 정렬
+  const sortedMoves = [...moves].sort((a, b) =>
+    a.name.localeCompare(b.name, "ko")
+  );
 
   return (
     <div className="card border-indigo-300 bg-indigo-50/60">
@@ -614,7 +611,7 @@ function GuideCard({
           <span>✨</span>
           <span>재배치 가이드</span>
           <span className="text-xs font-normal text-slate-500">
-            {timeStr} 기준 · 이동 {moves.length}건 · 칩을 드래그해서 직접 이동시켜
+            {timeStr} 기준 · {moves.length}명 · 칩을 드래그해서 직접 이동시켜
             주세요
           </span>
         </h2>
@@ -626,38 +623,29 @@ function GuideCard({
           닫기 ✕
         </button>
       </div>
-      {moves.length === 0 ? (
+      {sortedMoves.length === 0 ? (
         <div className="text-sm text-slate-500 italic">
           현재 시각 기준 이동 권장 사항이 없습니다.
         </div>
       ) : (
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-          {targets.map((target) => {
-            const items = byTarget.get(target)!;
-            return (
-              <div
-                key={target}
-                className="rounded-lg border border-indigo-200 bg-white p-2.5"
-              >
-                <div className="font-bold text-slate-800 text-sm mb-1.5 border-b border-indigo-100 pb-1">
-                  → {displayLineName(target)}{" "}
-                  <span className="text-xs font-normal text-slate-500">
-                    {items.length}명
-                  </span>
-                </div>
-                <ul className="text-xs space-y-0.5">
-                  {items.map((m) => (
-                    <li key={m.empCode} className="text-slate-700">
-                      <span className="font-semibold">{m.name}</span>
-                      <span className="text-slate-400 ml-1.5">
-                        ({displayLineName(m.fromLine)} →)
-                      </span>
-                    </li>
-                  ))}
-                </ul>
-              </div>
-            );
-          })}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-1.5">
+          {sortedMoves.map((m) => (
+            <div
+              key={m.empCode}
+              className="flex items-center gap-2 text-sm rounded-md border border-indigo-200 bg-white px-3 py-1.5"
+            >
+              <span className="font-bold text-slate-900 w-16 truncate">
+                {m.name}
+              </span>
+              <span className="font-mono text-xs text-slate-600 bg-slate-100 px-1.5 py-0.5 rounded">
+                {displayLineName(m.fromLine)}
+              </span>
+              <span className="text-indigo-500 font-bold">→</span>
+              <span className="font-mono text-xs text-white bg-indigo-600 px-1.5 py-0.5 rounded">
+                {displayLineName(m.toLine)}
+              </span>
+            </div>
+          ))}
         </div>
       )}
     </div>
