@@ -67,17 +67,81 @@ export function DaerimClockInView() {
   const employees = useDataStore((s) => s.employees);
   const urgentProduction = useDataStore((s) => s.urgentProduction);
   const workDate = useDataStore((s) => s.workDate);
+  const manualClockIns = useDataStore((s) => s.manualClockIns);
+  const currentLineOverrides = useDataStore((s) => s.currentLineOverrides);
+  const supportTargetMap = useDataStore((s) => s.supportTargetMap);
   const { groups, extraFree, lineWorkers } = useDaerimRealloc();
 
-  // 재배치 가이드 — 현재 시각의 라인별 목표 인원 기준 minimum-churn 배치
-  //   원래 라인이 여전히 그 인원을 필요로 하면 그대로 유지 (불필요 이동 방지)
+  // 재배치 가이드 — 지원 보낸/받은 인원 반영한 minimum-churn 배치
   const computeAutoPlaceGuide = useCallback((): GuideMove[] => {
-    const result = computeReallocation(groups, 0, 8, extraFree, false, true);
+    const SELF_LINE = "포장2라인";
+    const nameToEmp = new Map<string, Employee>();
+    for (const e of employees) nameToEmp.set(e.name, e);
+
+    // 0) 우리 회사 직원 중 지원 보낸 사람 (작업가능에서 제외)
+    const sendingAwayNames = new Set<string>();
+    for (const e of employees) {
+      if (!e.department.includes("대림산업")) continue;
+      const target = supportTargetMap[e.empCode];
+      if (
+        currentLineOverrides[e.empCode] === "지원" &&
+        target &&
+        target !== SELF_LINE
+      ) {
+        sendingAwayNames.add(e.name);
+      }
+    }
+
+    // 0-B) 다른 회사에서 우리 라인 지원 온 사람 (작업가능에 추가)
+    //   currentLineOverrides 가 우리 슬롯이면 그 슬롯에 배치, '지원' 이면 풀
+    const receivedSlot: Array<{ name: string; slot: string }> = [];
+    const receivedPool: string[] = []; // 슬롯 없이 풀에 있음
+    for (const e of employees) {
+      if (e.department.includes("대림산업")) continue;
+      if (!manualClockIns[e.empCode]) continue;
+      const target = supportTargetMap[e.empCode];
+      if (target !== SELF_LINE) continue;
+      const override = currentLineOverrides[e.empCode];
+      if (override && override !== "지원" && GRID_LINES.has(override)) {
+        receivedSlot.push({ name: e.name, slot: override });
+      } else {
+        receivedPool.push(e.name);
+      }
+    }
+
+    // 1) effectiveLineWorkers — 지원 보낸 제외 + 받은 지원(슬롯 배치) 포함
+    const effectiveLineWorkers: Record<string, string[]> = {};
+    const originLineOf = new Map<string, string>();
+    for (const [line, workers] of Object.entries(lineWorkers)) {
+      const kept: string[] = [];
+      for (const w of workers) {
+        if (sendingAwayNames.has(w)) continue;
+        kept.push(w);
+        originLineOf.set(w, line);
+      }
+      effectiveLineWorkers[line] = kept;
+    }
+    for (const r of receivedSlot) {
+      if (!effectiveLineWorkers[r.slot]) effectiveLineWorkers[r.slot] = [];
+      effectiveLineWorkers[r.slot].push(r.name);
+      originLineOf.set(r.name, r.slot);
+    }
+    // 풀 인원은 어디 출발인지 없음 — '지원' 으로 표시
+    for (const name of receivedPool) {
+      originLineOf.set(name, "지원");
+    }
+
+    // 2) groups 의 headcount 를 effective 기준으로 보정 → 알고리즘에 정확한 입력
+    const adjustedGroups = groups.map((g) => ({
+      ...g,
+      headcount: (effectiveLineWorkers[g.name] ?? []).length,
+    }));
+    const result = computeReallocation(adjustedGroups, 0, 8, extraFree, false, true);
     const now = new Date();
     const wall = now.getHours() + now.getMinutes() / 60;
     const currentWt = wallToWorkTime(wall);
 
-    // 1) 현재 시각의 라인별 목표 인원 산출
+    // 3) 현재 시각의 라인별 목표 인원
     const targets = new Map<string, number>();
     for (const t of result.timelines) {
       let target = 0;
@@ -90,16 +154,12 @@ export function DaerimClockInView() {
       targets.set(t.name, target);
     }
 
-    // 2) 워커 초기 배치 + 원래 라인 기억
+    // 4) 초과 추출 + 부족 식별
     const allocation = new Map<string, string[]>();
-    const originLineOf = new Map<string, string>();
-    for (const [line, workers] of Object.entries(lineWorkers)) {
+    for (const [line, workers] of Object.entries(effectiveLineWorkers)) {
       allocation.set(line, [...workers]);
-      for (const w of workers) originLineOf.set(w, line);
     }
-
-    // 3) 초과 인원 추출 (원래 라인의 target 까지만 유지)
-    const excess: string[] = [];
+    const excess: string[] = [...receivedPool]; // 풀 인원은 처음부터 excess
     const needs = new Map<string, number>();
     for (const [line, workers] of allocation) {
       const target = targets.get(line) ?? 0;
@@ -110,7 +170,6 @@ export function DaerimClockInView() {
         needs.set(line, target - workers.length);
       }
     }
-    // lineWorkers 에 없던 라인이 target>0 이면 needs 에 추가
     for (const [line, target] of targets) {
       if (!allocation.has(line) && target > 0) {
         needs.set(line, target);
@@ -118,7 +177,7 @@ export function DaerimClockInView() {
       }
     }
 
-    // 4) 초과 인원을 부족 라인에 배정
+    // 5) 초과 인원을 부족 라인에 배정
     for (const [line, count] of needs) {
       for (let i = 0; i < count; i++) {
         const worker = excess.shift();
@@ -127,11 +186,7 @@ export function DaerimClockInView() {
       }
     }
 
-    // 5) 가이드 생성 — 원래 라인과 다른 라인에 있는 워커만
-    const nameToEmp = new Map<string, Employee>();
-    for (const e of employees) {
-      if (e.department.includes("대림산업")) nameToEmp.set(e.name, e);
-    }
+    // 6) 가이드 생성
     const guides: GuideMove[] = [];
     for (const [line, workers] of allocation) {
       for (const w of workers) {
@@ -143,7 +198,15 @@ export function DaerimClockInView() {
       }
     }
     return guides;
-  }, [groups, extraFree, lineWorkers, employees]);
+  }, [
+    groups,
+    extraFree,
+    lineWorkers,
+    employees,
+    manualClockIns,
+    currentLineOverrides,
+    supportTargetMap,
+  ]);
 
   const config = useMemo<ClockInConfig>(
     () => ({

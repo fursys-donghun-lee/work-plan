@@ -67,16 +67,88 @@ export function DohoPackage1ClockInView() {
   const employees = useDataStore((s) => s.employees);
   const urgentProduction = useDataStore((s) => s.urgentProduction);
   const workDate = useDataStore((s) => s.workDate);
+  const manualClockIns = useDataStore((s) => s.manualClockIns);
+  const currentLineOverrides = useDataStore((s) => s.currentLineOverrides);
+  const supportTargetMap = useDataStore((s) => s.supportTargetMap);
   const { groups, extraFree, lineWorkers } = useDohoPackage1Realloc();
 
-  // 재배치 가이드 — 현재 시각의 라인별 목표 인원 기준 minimum-churn 배치
+  // 재배치 가이드 — 지원 보낸/받은 인원 반영한 minimum-churn 배치
   const computeAutoPlaceGuide = useCallback((): GuideMove[] => {
-    const result = computeReallocation(groups, 0, 8, extraFree, false, true);
+    const SELF_LINE = "포장1라인";
+    const nameToEmp = new Map<string, Employee>();
+    for (const e of employees) nameToEmp.set(e.name, e);
+
+    // 우리 회사 직원 중 지원 보낸 사람 (작업가능에서 제외)
+    const sendingAwayNames = new Set<string>();
+    for (const e of employees) {
+      if (!e.department.includes("다호산업")) continue;
+      const target = supportTargetMap[e.empCode];
+      if (
+        currentLineOverrides[e.empCode] === "지원" &&
+        target &&
+        target !== SELF_LINE
+      ) {
+        sendingAwayNames.add(e.name);
+      }
+    }
+
+    // 다른 회사에서 우리 라인 지원 온 사람
+    //   override 가 우리 슬롯(raw — 포장1(CR1) 등)이면 그 슬롯에 배치, '지원' 이면 풀
+    const receivedSlot: Array<{ name: string; rawSlot: string }> = [];
+    const receivedPool: string[] = [];
+    const REALLOC_GROUPS_SET = new Set<string>(groups.map((g) => g.name));
+    for (const e of employees) {
+      if (e.department.includes("다호산업")) continue;
+      if (!manualClockIns[e.empCode]) continue;
+      const target = supportTargetMap[e.empCode];
+      if (target !== SELF_LINE) continue;
+      const override = currentLineOverrides[e.empCode];
+      if (override && override !== "지원") {
+        // 현장 슬롯명을 raw 그룹명으로 역변환
+        const entry = Object.entries(POSITION_TO_SLOT).find(
+          ([, slot]) => slot === override
+        );
+        const rawSlot = entry ? entry[0] : override;
+        if (REALLOC_GROUPS_SET.has(rawSlot)) {
+          receivedSlot.push({ name: e.name, rawSlot });
+        } else {
+          receivedPool.push(e.name);
+        }
+      } else {
+        receivedPool.push(e.name);
+      }
+    }
+
+    // effectiveLineWorkers
+    const effectiveLineWorkers: Record<string, string[]> = {};
+    const originLineOf = new Map<string, string>();
+    for (const [line, workers] of Object.entries(lineWorkers)) {
+      const kept: string[] = [];
+      for (const w of workers) {
+        if (sendingAwayNames.has(w)) continue;
+        kept.push(w);
+        originLineOf.set(w, line);
+      }
+      effectiveLineWorkers[line] = kept;
+    }
+    for (const r of receivedSlot) {
+      if (!effectiveLineWorkers[r.rawSlot]) effectiveLineWorkers[r.rawSlot] = [];
+      effectiveLineWorkers[r.rawSlot].push(r.name);
+      originLineOf.set(r.name, r.rawSlot);
+    }
+    for (const name of receivedPool) {
+      originLineOf.set(name, "지원");
+    }
+
+    const adjustedGroups = groups.map((g) => ({
+      ...g,
+      headcount: (effectiveLineWorkers[g.name] ?? []).length,
+    }));
+    const result = computeReallocation(adjustedGroups, 0, 8, extraFree, false, true);
     const now = new Date();
     const wall = now.getHours() + now.getMinutes() / 60;
     const currentWt = wallToWorkTime(wall);
 
-    // 1) 현재 시각의 라인별 목표 인원
     const targets = new Map<string, number>();
     for (const t of result.timelines) {
       let target = 0;
@@ -89,16 +161,11 @@ export function DohoPackage1ClockInView() {
       targets.set(t.name, target);
     }
 
-    // 2) 초기 배치 + 원래 라인 기억
     const allocation = new Map<string, string[]>();
-    const originLineOf = new Map<string, string>();
-    for (const [line, workers] of Object.entries(lineWorkers)) {
+    for (const [line, workers] of Object.entries(effectiveLineWorkers)) {
       allocation.set(line, [...workers]);
-      for (const w of workers) originLineOf.set(w, line);
     }
-
-    // 3) 초과 인원 추출
-    const excess: string[] = [];
+    const excess: string[] = [...receivedPool];
     const needs = new Map<string, number>();
     for (const [line, workers] of allocation) {
       const target = targets.get(line) ?? 0;
@@ -116,7 +183,6 @@ export function DohoPackage1ClockInView() {
       }
     }
 
-    // 4) 초과 인원을 부족 라인에 배정
     for (const [line, count] of needs) {
       for (let i = 0; i < count; i++) {
         const worker = excess.shift();
@@ -125,11 +191,6 @@ export function DohoPackage1ClockInView() {
       }
     }
 
-    // 5) 가이드 생성 — 원래 라인과 다른 라인의 워커만, 슬롯명 변환
-    const nameToEmp = new Map<string, Employee>();
-    for (const e of employees) {
-      if (e.department.includes("다호산업")) nameToEmp.set(e.name, e);
-    }
     const guides: GuideMove[] = [];
     for (const [rawLine, workers] of allocation) {
       for (const w of workers) {
@@ -137,13 +198,22 @@ export function DohoPackage1ClockInView() {
         if (!rawOrigin || rawOrigin === rawLine) continue;
         const emp = nameToEmp.get(w);
         if (!emp) continue;
-        const fromLine = REALLOC_GROUP_TO_SLOT[rawOrigin] ?? rawOrigin;
+        const fromLine =
+          rawOrigin === "지원" ? "지원" : REALLOC_GROUP_TO_SLOT[rawOrigin] ?? rawOrigin;
         const toLine = REALLOC_GROUP_TO_SLOT[rawLine] ?? rawLine;
         guides.push({ empCode: emp.empCode, name: w, fromLine, toLine });
       }
     }
     return guides;
-  }, [groups, extraFree, lineWorkers, employees]);
+  }, [
+    groups,
+    extraFree,
+    lineWorkers,
+    employees,
+    manualClockIns,
+    currentLineOverrides,
+    supportTargetMap,
+  ]);
 
   const config = useMemo<ClockInConfig>(
     () => ({
