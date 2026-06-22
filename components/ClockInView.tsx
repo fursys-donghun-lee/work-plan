@@ -34,8 +34,16 @@ export interface ClockInConfig {
   // 직원 필터 (선택) — true 인 직원만 대시보드에 노출 (구분 필터 등)
   //   companyDept 매칭 이후 추가로 적용됨
   categoryFilter?: (e: Employee) => boolean;
-  // 자동 재배치 콜백 — 제공되면 '재배치' 버튼 노출
-  onAutoPlace?: () => void;
+  // 자동 재배치 가이드 — 제공되면 '재배치' 버튼 노출
+  //   클릭 시 이동 권장 목록을 가이드로 표시 (자동 적용 X — 사용자가 직접 드래그)
+  computeAutoPlaceGuide?: () => GuideMove[];
+}
+
+export interface GuideMove {
+  empCode: string;
+  name: string;
+  fromLine: string;
+  toLine: string;
 }
 
 export interface ClockInViewProps {
@@ -83,6 +91,8 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
     isSupporting: false,
   });
   const [draggingEmpCode, setDraggingEmpCode] = useState<string | null>(null);
+  // 재배치 가이드 — null=닫힘, 배열=표시
+  const [guideMoves, setGuideMoves] = useState<GuideMove[] | null>(null);
 
   const {
     presentBySlot,
@@ -296,12 +306,11 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
     resetLinePlacements(empCodes);
   };
 
-  // 자동 재배치 — config 가 제공한 콜백 호출
+  // 재배치 가이드 — 이동 권장 목록 표시 (자동 적용 X)
   const handleAutoPlace = () => {
-    if (!config.onAutoPlace) return;
-    if (!window.confirm("자동 재배치를 적용할까요? (출근한 인원 한정, 지원 중인 인원 제외)"))
-      return;
-    config.onAutoPlace();
+    if (!config.computeAutoPlaceGuide) return;
+    const moves = config.computeAutoPlaceGuide();
+    setGuideMoves(moves);
   };
 
   // 일괄 출근 — 출근 전 인원 모두 출근 처리
@@ -362,7 +371,7 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
               </span>
             )}
           </button>
-          {config.onAutoPlace && (
+          {config.computeAutoPlaceGuide && (
             <button
               type="button"
               onClick={handleAutoPlace}
@@ -373,9 +382,9 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
                   ? "bg-slate-100 text-slate-400 border-slate-200 cursor-not-allowed"
                   : "bg-indigo-600 hover:bg-indigo-700 text-white border-indigo-700"
               )}
-              title="재배치 계획의 자동 배치 로직을 현재 출근 인원에 적용"
+              title="재배치 가이드 표시 (직접 드래그로 이동 적용)"
             >
-              ✨ 재배치
+              ✨ 재배치 가이드
             </button>
           )}
           <button
@@ -431,6 +440,15 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
           </div>
         </div>
       </div>
+
+      {/* 재배치 가이드 — 자동 적용 X, 권장 이동 목록만 표시 */}
+      {guideMoves !== null && (
+        <GuideCard
+          moves={guideMoves}
+          displayLineName={displayName}
+          onClose={() => setGuideMoves(null)}
+        />
+      )}
 
       <div className="flex gap-4 items-start">
         <div className="flex-1 min-w-0 space-y-3">
@@ -569,6 +587,82 @@ export function ClockInView({ config, urgentSlots }: ClockInViewProps) {
 }
 
 // ===== 헬퍼 컴포넌트 =====
+
+function GuideCard({
+  moves,
+  displayLineName,
+  onClose,
+}: {
+  moves: GuideMove[];
+  displayLineName: (line: string) => string;
+  onClose: () => void;
+}) {
+  const now = new Date();
+  const timeStr = `${String(now.getHours()).padStart(2, "0")}:${String(now.getMinutes()).padStart(2, "0")}`;
+  // 도착 라인별로 그룹화 — 어디로 가야 하는지 한눈에 보기
+  const byTarget = new Map<string, GuideMove[]>();
+  for (const m of moves) {
+    if (!byTarget.has(m.toLine)) byTarget.set(m.toLine, []);
+    byTarget.get(m.toLine)!.push(m);
+  }
+  const targets = Array.from(byTarget.keys()).sort();
+
+  return (
+    <div className="card border-indigo-300 bg-indigo-50/60">
+      <div className="flex items-center justify-between mb-3">
+        <h2 className="font-bold text-slate-900 text-base flex items-center gap-2">
+          <span>✨</span>
+          <span>재배치 가이드</span>
+          <span className="text-xs font-normal text-slate-500">
+            {timeStr} 기준 · 이동 {moves.length}건 · 칩을 드래그해서 직접 이동시켜
+            주세요
+          </span>
+        </h2>
+        <button
+          type="button"
+          onClick={onClose}
+          className="text-sm text-slate-500 hover:text-slate-700 px-3 py-1 rounded hover:bg-white"
+        >
+          닫기 ✕
+        </button>
+      </div>
+      {moves.length === 0 ? (
+        <div className="text-sm text-slate-500 italic">
+          현재 시각 기준 이동 권장 사항이 없습니다.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+          {targets.map((target) => {
+            const items = byTarget.get(target)!;
+            return (
+              <div
+                key={target}
+                className="rounded-lg border border-indigo-200 bg-white p-2.5"
+              >
+                <div className="font-bold text-slate-800 text-sm mb-1.5 border-b border-indigo-100 pb-1">
+                  → {displayLineName(target)}{" "}
+                  <span className="text-xs font-normal text-slate-500">
+                    {items.length}명
+                  </span>
+                </div>
+                <ul className="text-xs space-y-0.5">
+                  {items.map((m) => (
+                    <li key={m.empCode} className="text-slate-700">
+                      <span className="font-semibold">{m.name}</span>
+                      <span className="text-slate-400 ml-1.5">
+                        ({displayLineName(m.fromLine)} →)
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function NotClockedInGroup({
   label,

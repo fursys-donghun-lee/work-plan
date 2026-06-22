@@ -1,7 +1,11 @@
 "use client";
 
 import { useMemo, useCallback } from "react";
-import { ClockInView, type ClockInConfig } from "@/components/ClockInView";
+import {
+  ClockInView,
+  type ClockInConfig,
+  type GuideMove,
+} from "@/components/ClockInView";
 import { useDataStore } from "@/lib/store/useDataStore";
 import { useDaerimRealloc } from "@/components/useDaerimRealloc";
 import { computeReallocation, wallToWorkTime } from "@/lib/calc/reallocation";
@@ -63,22 +67,24 @@ export function DaerimClockInView() {
   const employees = useDataStore((s) => s.employees);
   const urgentProduction = useDataStore((s) => s.urgentProduction);
   const workDate = useDataStore((s) => s.workDate);
-  const bulkMoveWorkers = useDataStore((s) => s.bulkMoveWorkers);
   const { groups, extraFree, lineWorkers } = useDaerimRealloc();
 
-  // 재배치 계획의 자동 배치 로직 — 현재 시각까지 진행된 이동만 적용
-  const handleAutoPlace = useCallback(() => {
+  // 재배치 가이드 — 현재 시각까지 진행돼야 할 이동만 권장 목록으로 반환 (자동 적용 X)
+  const computeAutoPlaceGuide = useCallback((): GuideMove[] => {
     const result = computeReallocation(groups, 0, 8, extraFree, false, true);
-    // 현재 시각 → work-time 변환 (08:30 = wt 0)
     const now = new Date();
     const wall = now.getHours() + now.getMinutes() / 60;
     const currentWt = wallToWorkTime(wall);
-    // 각 워커의 '현재 시각까지의 도착 라인' 계산
+    // 각 워커의 출발 라인 (기본 위치) + 현재 시각까지의 도착 라인 계산
     const byLine: Record<string, string[]> = {};
+    const startLineByName: Record<string, string> = {};
     const finalLineByName: Record<string, string> = {};
     for (const [line, workers] of Object.entries(lineWorkers)) {
       byLine[line] = [...workers];
-      for (const w of workers) finalLineByName[w] = line;
+      for (const w of workers) {
+        startLineByName[w] = line;
+        finalLineByName[w] = line;
+      }
     }
     const sortedMoves = [...result.moves]
       .filter((m) => m.time <= currentWt + 1e-6)
@@ -93,19 +99,21 @@ export function DaerimClockInView() {
         finalLineByName[worker] = m.to;
       }
     }
-    // name → empCode 매핑 + 이동 list 생성
+    // 이동이 필요한 인원만 (출발 != 도착) 가이드 항목으로
     const nameToEmp = new Map<string, Employee>();
     for (const e of employees) {
       if (e.department.includes("대림산업")) nameToEmp.set(e.name, e);
     }
-    const moves: Array<{ empCode: string; name: string; toLine: string }> = [];
-    for (const [name, line] of Object.entries(finalLineByName)) {
+    const guides: GuideMove[] = [];
+    for (const [name, toLine] of Object.entries(finalLineByName)) {
+      const fromLine = startLineByName[name] ?? "";
+      if (fromLine === toLine) continue;
       const emp = nameToEmp.get(name);
       if (!emp) continue;
-      moves.push({ empCode: emp.empCode, name, toLine: line });
+      guides.push({ empCode: emp.empCode, name, fromLine, toLine });
     }
-    bulkMoveWorkers(moves);
-  }, [groups, extraFree, lineWorkers, employees, bulkMoveWorkers]);
+    return guides;
+  }, [groups, extraFree, lineWorkers, employees]);
 
   const config = useMemo<ClockInConfig>(
     () => ({
@@ -117,9 +125,9 @@ export function DaerimClockInView() {
       slotFor,
       classifyGroup,
       displayLineName: (l) => (l === "자동포장라인" ? "자동포장" : l),
-      onAutoPlace: handleAutoPlace,
+      computeAutoPlaceGuide,
     }),
-    [handleAutoPlace]
+    [computeAutoPlaceGuide]
   );
 
   const urgentSlots = useMemo(() => {
